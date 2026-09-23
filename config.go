@@ -152,12 +152,19 @@ func (c *config) clearGroup(repository string) {
 	}
 }
 
-func (c *config) exclude(repository string) bool {
+func (c config) isExcluded(repository string) bool {
 	key := pathKey(repository)
 	for _, existing := range c.Excluded {
 		if pathKey(existing) == key {
-			return false
+			return true
 		}
+	}
+	return false
+}
+
+func (c *config) exclude(repository string) bool {
+	if c.isExcluded(repository) {
+		return false
 	}
 	c.Excluded = append(c.Excluded, filepath.Clean(repository))
 	return true

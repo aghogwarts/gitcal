@@ -67,14 +67,15 @@ type calendarModel struct {
 
 	// The repository picker (viewRepos) edits chosen.config directly and saves
 	// on every change, so a crash mid-edit cannot lose more than one keystroke.
-	repos        []string
-	reposIndex   int
-	reposLoading bool
-	reposErr     error
-	reposSaveErr error
-	reposChanged bool
-	editingGroup bool
-	groupInput   string
+	repos                []string
+	reposIndex           int
+	reposLoading         bool
+	reposErr             error
+	reposSaveErr         error
+	reposChanged         bool
+	reposInterruptedLoad bool
+	editingGroup         bool
+	groupInput           string
 }
 
 func newCalendarModel(ctx context.Context, chosen selection, month time.Time, entriesPerDay, width int) calendarModel {
@@ -167,6 +168,13 @@ func (m calendarModel) toggleMine() (tea.Model, tea.Cmd) {
 // folders. It shares the cancel-the-predecessor pattern with beginLoad, since
 // only one background scan is ever useful at a time.
 func (m *calendarModel) beginReposScan() tea.Cmd {
+	if m.loading {
+		// The calendar command may still deliver a canceled result. Invalidate
+		// its request, and reload when the user returns to the grid.
+		m.request++
+		m.loading = false
+		m.reposInterruptedLoad = true
+	}
 	if m.cancel != nil {
 		m.cancel()
 	}
@@ -188,10 +196,10 @@ func (m *calendarModel) toggleExclude() {
 		return
 	}
 	repository := m.repos[m.reposIndex]
-	if m.chosen.filter.includes(repository) {
-		m.chosen.config.exclude(repository)
-	} else {
+	if m.chosen.config.isExcluded(repository) {
 		m.chosen.config.include(repository)
+	} else {
+		m.chosen.config.exclude(repository)
 	}
 	m.saveChosen()
 }
@@ -223,7 +231,7 @@ func (m calendarModel) currentGroup() string {
 // for the picker to close, so a change survives even if the program is killed
 // right afterwards.
 func (m *calendarModel) saveChosen() {
-	m.chosen.filter = m.chosen.config.filter(m.chosen.group)
+	m.chosen.filter = m.chosen.config.filter(m.activeGroup)
 	m.reposChanged = true
 	m.reposSaveErr = saveConfig(m.chosen.path, m.chosen.config)
 }
@@ -312,10 +320,9 @@ func (m calendarModel) handleReposKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "esc", "backspace", "left", "h":
 		m.mode = viewGrid
-		if m.reposChanged {
-			// A group or exclusion changed, so the grid it is about to show
-			// again would otherwise contradict what was just edited.
-			m.reposChanged = false
+		if m.reposChanged || m.reposInterruptedLoad {
+			// Edits and interrupted loads both require fresh calendar data.
+			m.reposChanged, m.reposInterruptedLoad = false, false
 			return m, (&m).beginLoad()
 		}
 		return m, nil
@@ -532,7 +539,7 @@ func (m calendarModel) reposView() string {
 			marker = "▸ "
 		}
 		name := displayText(filepath.Base(repository))
-		included := m.chosen.filter.includes(repository)
+		included := !m.chosen.config.isExcluded(repository)
 		state := m.chosen.filter.groupOf(repository)
 		stateStyle := m.styles.status
 		switch {

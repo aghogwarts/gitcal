@@ -351,6 +351,50 @@ func TestExcludeTogglesBackAndForthAndPersists(t *testing.T) {
 	}
 }
 
+func TestPickerExclusionDoesNotDependOnActiveGroup(t *testing.T) {
+	work := filepath.FromSlash("/projects/api")
+	personal := filepath.FromSlash("/projects/blog")
+	model := newReposTestModel(t, work, personal)
+	model.chosen.config.setGroup(work, "work")
+	model.chosen.config.setGroup(personal, "personal")
+	model.activeGroup = "work"
+	model.chosen.filter = model.chosen.config.filter("work")
+	model.reposIndex = 1
+
+	if strings.Contains(model.View(), "excluded") {
+		t.Fatal("a repository in another group is not excluded")
+	}
+	excluded := press(t, model, keyRune("e"))
+	if excluded.chosen.config.filter("").includes(personal) {
+		t.Fatal("e should exclude a repository even when another group is active")
+	}
+	if !strings.Contains(excluded.View(), "excluded") {
+		t.Fatal("the picker should show the saved exclusion")
+	}
+	included := press(t, excluded, keyRune("e"))
+	if !included.chosen.config.filter("").includes(personal) {
+		t.Fatal("a second e should include the repository again")
+	}
+}
+
+func TestPickerEditPreservesCycledGroup(t *testing.T) {
+	work := filepath.FromSlash("/projects/api")
+	personal := filepath.FromSlash("/projects/blog")
+	model := newReposTestModel(t, work)
+	model.chosen.config.setGroup(work, "work")
+	model.chosen.config.setGroup(personal, "personal")
+	model.activeGroup = "work" // The session reached work with Tab; --group was omitted.
+	model.chosen.filter = model.chosen.config.filter("work")
+
+	edited := press(t, model, keyRune("e"))
+	if edited.chosen.filter.includes(personal) {
+		t.Fatal("editing the picker must not broaden the calendar's active work filter")
+	}
+	if edited.activeGroup != "work" || edited.chosen.group != "" {
+		t.Fatal("picker edits must preserve the session group and launch flag")
+	}
+}
+
 // Leaving the picker must reload the grid when something changed, and must
 // not waste a scan when nothing did.
 func TestLeavingTheRepositoryPickerReloadsOnlyIfSomethingChanged(t *testing.T) {
@@ -371,6 +415,28 @@ func TestLeavingTheRepositoryPickerReloadsOnlyIfSomethingChanged(t *testing.T) {
 	}
 	if updated.reposChanged {
 		t.Fatal("the changed flag should reset once the reload has been started")
+	}
+}
+
+func TestLeavingPickerReloadsAnInterruptedCalendarScan(t *testing.T) {
+	model := newTestModel(t)
+	model.loading = true
+	previousRequest := model.request
+
+	opened := press(t, model, keyRune("g"))
+	stale, _ := opened.Update(activityLoadedMsg{request: previousRequest, err: context.Canceled})
+	opened = stale.(calendarModel)
+	if opened.loadErr != nil {
+		t.Fatalf("a canceled calendar scan became a user-visible error: %v", opened.loadErr)
+	}
+
+	returned, command := opened.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	grid := returned.(calendarModel)
+	if grid.mode != viewGrid || !grid.loading || command == nil {
+		t.Fatal("leaving the picker should restart an interrupted calendar scan")
+	}
+	if grid.loadErr != nil {
+		t.Fatalf("the grid showed the canceled scan as an error: %v", grid.loadErr)
 	}
 }
 
