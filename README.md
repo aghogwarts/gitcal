@@ -145,10 +145,13 @@ path(s). The final line gives unique-commit, active-day, and repository counts.
 - This is the data preparation step for the calendar grid below. It prints only
   days with activity; `calendar` renders every date in the month.
 
-**Performance:** this learning increment reads a repository's entire reachable
-history into memory before filtering, one repository at a time. Large histories
-and broad scan roots can be slow. Start with a small projects folder. Streaming,
-caching, progress reporting, and saved repository selections are future work.
+**Performance:** the first visit to a month reads each selected repository's
+entire reachable history into memory before filtering, one repository at a time.
+Large histories and broad scan roots can be slow. The interactive calendar keeps
+up to six completed month/filter views in memory during that run, so revisiting
+one needs no scan. `r` reads fresh data; a new run starts with an empty cache.
+`activity` and the static calendar still read fresh data every time. Streaming,
+progress reporting, and saved repository selections are future work.
 
 ## Browse the month as a calendar
 
@@ -224,8 +227,9 @@ file `repos set` and `repos exclude` write. Either interface can be used
 interchangeably; the picker is for a quick change mid-browse, and the command
 line is for scripting or editing several repositories at once.
 
-- Every month change re-reads all history, so a large projects folder takes a
-  moment. The footer reports progress, and superseded scans are cancelled.
+- A new month reads the selected repositories' history, which can take time.
+  Revisited months use the in-memory cache when the group and `m` filter match.
+  `r` and picker edits discard cached activity. Superseded scans are cancelled.
 - Weeks start on **Monday**. A configurable Sunday start is future work.
 - The grid sizes itself to the terminal, clamped between 78 and 204 columns.
   Redirecting output to a file or pipe uses 80 columns.
@@ -381,10 +385,9 @@ Exit codes: `0` success/help (including empty results), `1` failure or incomplet
 ## Intentional limits of this increment
 
 A repository belongs to one group, so overlapping categories are not
-expressible. There is no caching and no automatic dependency-folder
-exclusion, so the
-interactive calendar still re-reads every selected repository on each month
-change, and it does not scroll the grid itself. `scan` and `history` still take
+expressible. There is no persistent cache or automatic dependency-folder
+exclusion, so the first visit to each month re-reads every selected repository;
+the grid does not scroll itself. `scan` and `history` still take
 exactly one folder. Large directory trees may take time to scan. Bare
 repositories are not discovered because this increment looks for working
 checkouts with a `.git` marker. Separate worktrees appear separately in `scan`,

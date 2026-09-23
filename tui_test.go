@@ -110,7 +110,7 @@ func TestSupersededScanResultsAreDiscarded(t *testing.T) {
 	stale := Activity{Month: model.month, Days: []ActivityDay{{Date: "2026-09-05",
 		Entries: []ActivityEntry{calendarEntry(t, "2026-09-05T09:00", "api", "Stale")}}}}
 	next, _ := model.Update(activityLoadedMsg{request: 1, activity: stale})
-	if updated := next.(calendarModel); len(updated.activity.Days) != 0 || !updated.loading {
+	if updated := next.(calendarModel); len(updated.activity.Days) != 0 || !updated.loading || len(updated.cache) != 0 {
 		t.Fatal("an old month's result was applied")
 	}
 
@@ -118,6 +118,126 @@ func TestSupersededScanResultsAreDiscarded(t *testing.T) {
 	updated := next.(calendarModel)
 	if len(updated.activity.Days) != 1 || updated.loading {
 		t.Fatal("the current month's result was not applied")
+	}
+}
+
+func TestReturningToVisitedMonthUsesCachedActivity(t *testing.T) {
+	model := newTestModel(t)
+	model.loading = true
+	september, _ := model.Update(activityLoadedMsg{request: model.request, activity: Activity{
+		Month: model.month, ReadRepositories: 1,
+	}})
+	model = september.(calendarModel)
+
+	toOctober, command := model.Update(keyRune("]"))
+	october := toOctober.(calendarModel)
+	if command == nil || !october.loading {
+		t.Fatal("the first visit to October should read its activity")
+	}
+	loaded, _ := october.Update(activityLoadedMsg{request: october.request, activity: Activity{
+		Month: october.month, ReadRepositories: 2,
+	}})
+	october = loaded.(calendarModel)
+
+	back, command := october.Update(keyRune("["))
+	returned := back.(calendarModel)
+	if command != nil || returned.loading || returned.activity.ReadRepositories != 1 {
+		t.Fatal("returning to September should show its completed activity without another scan")
+	}
+}
+
+func TestCachedActivityRespectsGroupAndAuthorFilters(t *testing.T) {
+	model := newTestModel(t)
+	model.chosen.config.setGroup("/projects/api", "work")
+	model.chosen.config.addIdentity("me@example.invalid")
+	model.chosen.authors = model.chosen.config.authors(false)
+	model.loading = true
+	all, _ := model.Update(activityLoadedMsg{request: model.request, activity: Activity{
+		Month: model.month, ReadRepositories: 2,
+	}})
+	model = all.(calendarModel)
+
+	grouped, command := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	work := grouped.(calendarModel)
+	if command == nil || !work.loading {
+		t.Fatal("work should not reuse the unfiltered month's activity")
+	}
+	loaded, _ := work.Update(activityLoadedMsg{request: work.request, activity: Activity{
+		Month: work.month, ReadRepositories: 1,
+	}})
+	work = loaded.(calendarModel)
+
+	mine, command := work.Update(keyRune("m"))
+	if command == nil || !mine.(calendarModel).loading {
+		t.Fatal("mine-only should not reuse everyone's activity")
+	}
+	back, command := mine.Update(keyRune("m"))
+	returned := back.(calendarModel)
+	if command != nil || returned.loading || returned.activity.ReadRepositories != 1 {
+		t.Fatal("turning mine-only off should reuse the matching work view")
+	}
+}
+
+func TestRefreshAndPickerEditsDiscardCachedActivity(t *testing.T) {
+	model := newReposTestModel(t, filepath.FromSlash("/projects/api"))
+	model.mode, model.loading = viewGrid, true
+	loaded, _ := model.Update(activityLoadedMsg{request: model.request, activity: Activity{
+		Month: model.month, ReadRepositories: 1,
+	}})
+	model = loaded.(calendarModel)
+
+	refreshed, command := model.Update(keyRune("r"))
+	model = refreshed.(calendarModel)
+	if command == nil || !model.loading {
+		t.Fatal("r must fetch fresh activity even for a cached month")
+	}
+	loaded, _ = model.Update(activityLoadedMsg{request: model.request, activity: Activity{
+		Month: model.month, ReadRepositories: 2,
+	}})
+	model = loaded.(calendarModel)
+
+	opened := press(t, model, keyRune("g"))
+	changed := press(t, opened, keyRune("e"))
+	back, command := changed.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if command == nil || !back.(calendarModel).loading {
+		t.Fatal("an exclusion change must reload the month instead of using cached activity")
+	}
+}
+
+func TestRefreshingInPickerFetchesCalendarActivityOnReturn(t *testing.T) {
+	model := newReposTestModel(t)
+	model.mode, model.loading = viewGrid, true
+	loaded, _ := model.Update(activityLoadedMsg{request: model.request, activity: Activity{Month: model.month}})
+	opened := press(t, loaded.(calendarModel), keyRune("g"))
+	refreshed := press(t, opened, keyRune("r"))
+	back, command := refreshed.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if command == nil || !back.(calendarModel).loading {
+		t.Fatal("refreshing in the picker should fetch new calendar data on return")
+	}
+}
+
+func TestCalendarCacheKeepsOnlySixCompletedViews(t *testing.T) {
+	model := newTestModel(t)
+	model.loading = true
+	for visited := 0; visited < 7; visited++ {
+		loaded, _ := model.Update(activityLoadedMsg{request: model.request, activity: Activity{Month: model.month}})
+		model = loaded.(calendarModel)
+		if visited < 6 {
+			model = press(t, model, keyRune("]"))
+		}
+	}
+	if len(model.cache) != calendarCacheLimit {
+		t.Fatalf("the cache holds %d views, want no more than %d", len(model.cache), calendarCacheLimit)
+	}
+	for step := 0; step < 5; step++ {
+		model = press(t, model, keyRune("["))
+		if model.loading {
+			t.Fatal("one of the six recently visited months was missing from the cache")
+		}
+	}
+	back, command := model.Update(keyRune("["))
+	if command == nil || !back.(calendarModel).loading {
+		t.Fatal("the oldest month should be fetched again after eviction")
 	}
 }
 

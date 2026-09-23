@@ -41,6 +41,18 @@ type reposLoadedMsg struct {
 	err          error
 }
 
+// Cached results belong to a calendar month and its active filters. A different
+// group or author view can contain different commits for the very same month.
+type calendarCacheKey struct {
+	year  int
+	month time.Month
+	zone  *time.Location
+	group string
+	mine  bool
+}
+
+const calendarCacheLimit = 6
+
 type calendarModel struct {
 	root          context.Context
 	chosen        selection
@@ -56,6 +68,9 @@ type calendarModel struct {
 	loadErr  error
 	request  int
 	cancel   context.CancelFunc
+	// Keep a few completed views in memory for quick back-and-forth navigation.
+	cache map[calendarCacheKey]Activity
+	order []calendarCacheKey
 
 	width, height int
 	help          bool
@@ -67,15 +82,15 @@ type calendarModel struct {
 
 	// The repository picker (viewRepos) edits chosen.config directly and saves
 	// on every change, so a crash mid-edit cannot lose more than one keystroke.
-	repos                []string
-	reposIndex           int
-	reposLoading         bool
-	reposErr             error
-	reposSaveErr         error
-	reposChanged         bool
-	reposInterruptedLoad bool
-	editingGroup         bool
-	groupInput           string
+	repos            []string
+	reposIndex       int
+	reposLoading     bool
+	reposErr         error
+	reposSaveErr     error
+	reposChanged     bool
+	reposNeedsReload bool
+	editingGroup     bool
+	groupInput       string
 }
 
 func newCalendarModel(ctx context.Context, chosen selection, month time.Time, entriesPerDay, width int) calendarModel {
@@ -131,17 +146,48 @@ func (m calendarModel) Init() tea.Cmd {
 	return func() tea.Msg { return reloadMsg{} }
 }
 
-// beginLoad cancels any scan still running for a previous month, so holding a
-// month key does not leave several full history reads competing for the disk.
+func (m calendarModel) cacheKey() calendarCacheKey {
+	return calendarCacheKey{m.month.Year(), m.month.Month(), m.month.Location(), m.activeGroup, m.chosen.authors.mineOnly}
+}
+
+func (m *calendarModel) forgetCachedActivity() {
+	m.cache, m.order = nil, nil
+}
+
+// rememberActivity evicts the oldest completed view when the cache is full.
+func (m *calendarModel) rememberActivity(activity Activity) {
+	key := m.cacheKey()
+	if m.cache == nil {
+		m.cache = make(map[calendarCacheKey]Activity)
+	}
+	if _, exists := m.cache[key]; !exists {
+		if len(m.order) == calendarCacheLimit {
+			delete(m.cache, m.order[0])
+			m.order = m.order[1:]
+		}
+		m.order = append(m.order, key)
+	}
+	m.cache[key] = activity
+}
+
+// beginLoad cancels a previous scan, then either restores a completed view or
+// starts a fresh read. The request number rejects late results in both cases.
 func (m *calendarModel) beginLoad() tea.Cmd {
 	if m.cancel != nil {
 		m.cancel()
+		m.cancel = nil
+	}
+	m.request++
+	m.loadErr = nil
+	if cached, ok := m.cache[m.cacheKey()]; ok {
+		m.activity = cached
+		m.loading = false
+		m.commit = 0
+		return nil
 	}
 	ctx, cancel := context.WithCancel(m.root)
 	m.cancel = cancel
-	m.request++
 	m.loading = true
-	m.loadErr = nil
 
 	request, chosen, month := m.request, m.chosen, m.month
 	return func() tea.Msg {
@@ -173,7 +219,7 @@ func (m *calendarModel) beginReposScan() tea.Cmd {
 		// its request, and reload when the user returns to the grid.
 		m.request++
 		m.loading = false
-		m.reposInterruptedLoad = true
+		m.reposNeedsReload = true
 	}
 	if m.cancel != nil {
 		m.cancel()
@@ -232,6 +278,7 @@ func (m calendarModel) currentGroup() string {
 // right afterwards.
 func (m *calendarModel) saveChosen() {
 	m.chosen.filter = m.chosen.config.filter(m.activeGroup)
+	m.forgetCachedActivity()
 	m.reposChanged = true
 	m.reposSaveErr = saveConfig(m.chosen.path, m.chosen.config)
 }
@@ -253,6 +300,9 @@ func (m calendarModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.activity, m.loadErr = message.activity, message.err
 		m.commit = 0
+		if message.err == nil {
+			m.rememberActivity(message.activity)
+		}
 		return m, nil
 
 	case reposLoadedMsg:
@@ -292,7 +342,9 @@ func (m calendarModel) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.help = !m.help
 		return m, nil
 	case "r":
+		m.forgetCachedActivity()
 		if m.mode == viewRepos {
+			m.reposNeedsReload = true
 			return m, (&m).beginReposScan()
 		}
 		return m, (&m).beginLoad()
@@ -320,9 +372,9 @@ func (m calendarModel) handleReposKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "esc", "backspace", "left", "h":
 		m.mode = viewGrid
-		if m.reposChanged || m.reposInterruptedLoad {
-			// Edits and interrupted loads both require fresh calendar data.
-			m.reposChanged, m.reposInterruptedLoad = false, false
+		if m.reposChanged || m.reposNeedsReload {
+			// Edits, refreshes and interrupted loads need fresh calendar data.
+			m.reposChanged, m.reposNeedsReload = false, false
 			return m, (&m).beginLoad()
 		}
 		return m, nil
@@ -569,8 +621,7 @@ func (m calendarModel) reposView() string {
 	return output.String()
 }
 
-// status keeps loading and failure visible in the same place as the key hints,
-// which matters because every month change triggers a fresh scan.
+// status keeps loading and failure visible in the same place as the key hints.
 func (m calendarModel) status(keys string) string {
 	switch {
 	case m.loading:
@@ -594,7 +645,7 @@ var helpKeys = [][2]string{
 	{"Enter", "Open the selected date, then the selected commit"},
 	{"Esc", "Back up one level"},
 	{"t", "Jump to today"},
-	{"r", "Re-read the current month, or rescan repositories in the picker"},
+	{"r", "Refresh cached activity, or rescan repositories in the picker"},
 	{"g", "Open the repository picker: assign groups, exclude/include"},
 	{"Tab", "Cycle the calendar between all, ungrouped, and each group in use"},
 	{"m", "Toggle between everyone's commits and only your own"},
@@ -619,7 +670,7 @@ func (m calendarModel) helpView() string {
 		output.WriteString(m.styles.repository(name).render(name) + "  ")
 	}
 	output.WriteString("\n\n" + m.styles.status.render(
-		"Each month change re-reads every repository's history, so a large\n"+
-			"projects folder takes a moment. Caching is a later step.") + "\n")
+		"A new month reads every selected repository's history. The six most\n"+
+			"recent completed views stay in memory; r fetches fresh data.") + "\n")
 	return output.String()
 }
