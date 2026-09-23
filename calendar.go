@@ -33,6 +33,7 @@ type calendarOptions struct {
 	Selected      string // YYYY-MM-DD, set only by the interactive view.
 	EntriesPerDay int
 	Group         string // Named below the grid so a filtered month cannot look empty.
+	Mine          bool   // Named below the grid for the same reason.
 	Footer        string // Replaces the default hint below the grid.
 	Styles        styles // Disabled styles render plain text for pipes and NO_COLOR.
 }
@@ -127,8 +128,15 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 
 	scope := fmt.Sprintf("read %d of %d selected repositories (%d discovered)",
 		activity.ReadRepositories, activity.SelectedRepositories, activity.DiscoveredRepositories)
+	var tags []string
+	if options.Mine {
+		tags = append(tags, "mine only")
+	}
 	if options.Group != "" {
-		scope = style.label.render(options.Group+" only") + " · " + scope
+		tags = append(tags, options.Group+" only")
+	}
+	if len(tags) > 0 {
+		scope = style.label.render(strings.Join(tags, " · ")) + " · " + scope
 	}
 	fmt.Fprintf(&output, "\n%d unique commits on %d days; %s.\n", total, len(activity.Days), scope)
 	footer := options.Footer
@@ -326,8 +334,12 @@ func renderCommitDetail(entry ActivityEntry, location *time.Location, style styl
 	var output strings.Builder
 	fmt.Fprintf(&output, "%s\n\n", style.heading.render(displayText(commit.Subject)))
 	fmt.Fprintf(&output, "%s  %s\n", style.label.render("  Commit"), commit.Hash)
-	fmt.Fprintf(&output, "%s  %s <%s>\n", style.label.render("  Author"),
+	author := fmt.Sprintf("%s  %s <%s>", style.label.render("  Author"),
 		displayText(commit.AuthorName), displayText(commit.AuthorEmail))
+	if entry.Mine {
+		author += "  " + style.label.render("(you)")
+	}
+	fmt.Fprintln(&output, author)
 	fmt.Fprintf(&output, "%s  %s\n", style.label.render("  Date  "),
 		commit.AuthoredAt.In(location).Format("Monday, 2 January 2006, 15:04 -07:00"))
 	for index, repository := range entry.Repositories {

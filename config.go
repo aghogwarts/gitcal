@@ -18,9 +18,10 @@ const ungrouped = "ungrouped"
 // config is what gitcal remembers between runs. The commands write it; editing
 // it by hand stays possible, which is why the format is readable.
 type config struct {
-	Roots    []string          `toml:"roots"`
-	Excluded []string          `toml:"excluded"`
-	Groups   map[string]string `toml:"groups"`
+	Roots      []string          `toml:"roots"`
+	Excluded   []string          `toml:"excluded"`
+	Groups     map[string]string `toml:"groups"`
+	Identities []string          `toml:"identities"` // Author emails that count as yours.
 }
 
 const configHeader = `# gitcal configuration.
@@ -67,6 +68,7 @@ func loadConfig(path string) (config, error) {
 func saveConfig(path string, saved config) error {
 	sort.Strings(saved.Roots)
 	sort.Strings(saved.Excluded)
+	sort.Strings(saved.Identities)
 	if len(saved.Groups) == 0 {
 		saved.Groups = nil
 	}
@@ -170,6 +172,61 @@ func (c *config) include(repository string) bool {
 		}
 	}
 	return false
+}
+
+// addIdentity and removeIdentity compare emails case-insensitively, the way
+// mail systems do, rather than by the OS-dependent rules pathKey applies to
+// folders. Git itself never lowercases an address, so what is stored keeps
+// whatever case was typed.
+func (c *config) addIdentity(email string) bool {
+	key := strings.ToLower(strings.TrimSpace(email))
+	for _, existing := range c.Identities {
+		if strings.ToLower(existing) == key {
+			return false
+		}
+	}
+	c.Identities = append(c.Identities, strings.TrimSpace(email))
+	return true
+}
+
+func (c *config) removeIdentity(email string) bool {
+	key := strings.ToLower(strings.TrimSpace(email))
+	for index, existing := range c.Identities {
+		if strings.ToLower(existing) == key {
+			c.Identities = append(c.Identities[:index], c.Identities[index+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// authorFilter answers "is this commit mine?", the counterpart to
+// repositoryFilter answering "does this repository count?". Building the
+// lookup once means every renderer asks the same question the same way.
+type authorFilter struct {
+	identities map[string]bool
+	mineOnly   bool
+}
+
+func (c config) authors(mineOnly bool) authorFilter {
+	built := authorFilter{identities: make(map[string]bool, len(c.Identities)), mineOnly: mineOnly}
+	for _, email := range c.Identities {
+		built.identities[strings.ToLower(strings.TrimSpace(email))] = true
+	}
+	return built
+}
+
+func (f authorFilter) isMine(email string) bool {
+	return f.identities[strings.ToLower(strings.TrimSpace(email))]
+}
+
+// includes matches repositoryFilter.includes: the zero value, and one built
+// with mineOnly false, both include every commit.
+func (f authorFilter) includes(email string) bool {
+	if !f.mineOnly {
+		return true
+	}
+	return f.isMine(email)
 }
 
 // groupNames lists every group in use, so commands can report the real choices

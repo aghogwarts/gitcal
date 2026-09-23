@@ -13,6 +13,7 @@ type ActivityEntry struct {
 	Commit       Commit
 	Repositories []string
 	Groups       []string // Groups of the source repositories, sorted and unique.
+	Mine         bool     // Whether the author matches one of your configured identities.
 }
 
 type ActivityDay struct {
@@ -29,7 +30,7 @@ type Activity struct {
 	Warnings               []error
 }
 
-func collectActivity(ctx context.Context, roots []string, month time.Time, filter repositoryFilter) (Activity, error) {
+func collectActivity(ctx context.Context, roots []string, month time.Time, filter repositoryFilter, authors authorFilter) (Activity, error) {
 	start := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, month.Location())
 	end := start.AddDate(0, 1, 0)
 	result := Activity{Month: start}
@@ -79,6 +80,12 @@ func collectActivity(ctx context.Context, roots []string, month time.Time, filte
 
 	byDay := make(map[string][]ActivityEntry)
 	for _, entry := range byHash {
+		// Mine is set regardless of filtering, so a display can point out your
+		// own commits even while showing everyone's.
+		entry.Mine = authors.isMine(entry.Commit.AuthorEmail)
+		if !authors.includes(entry.Commit.AuthorEmail) {
+			continue
+		}
 		sort.Strings(entry.Repositories)
 		entry.Groups = groupsOf(entry.Repositories, filter)
 		date := entry.Commit.AuthoredAt.In(start.Location()).Format("2006-01-02")

@@ -1,14 +1,15 @@
-# gitcal — step 6: remembered folders and repository groups
+# gitcal — step 7: your Git identities
 
 A learning project for a local Git calendar, written in Go.
 
 The planned interface is a traditional monthly calendar with commits as events
 inside each day, optional repository groups, and filters. **This version discovers
 repositories, reads their history, presents one month at a time as a calendar you
-can move around with the keyboard, remembers which folders to scan, and lets you
+can move around with the keyboard, remembers which folders to scan, lets you
 assign each repository's group or exclude it either from the command line or from
-inside the interactive calendar itself.** Author filtering and caching are not
-implemented yet.
+inside the interactive calendar, and lets you tell it which author emails are
+yours so you can switch between your own commits and everyone's.** Caching is
+not implemented yet.
 `gitcal` is a working name, not a checked or reserved public project name.
 
 ## Requirements
@@ -182,7 +183,8 @@ go run . calendar --day 2026-09-18 "path/to/projects"
 | `--width`       | Grid width in columns; `0` (default) detects the terminal      |
 | `--interactive` | Force the keyboard interface even when output is redirected    |
 | `--static`      | Force a single printed grid even on a terminal                 |
-| `--group`       | Only repositories in this group; see the next section          |
+| `--group`       | Only repositories in this group; see the grouping section       |
+| `--mine`        | Only commits authored by one of your configured identities      |
 
 ### Keys
 
@@ -197,14 +199,16 @@ go run . calendar --day 2026-09-18 "path/to/projects"
 | `r`            | Re-read the current month, or rescan repositories in the picker |
 | `g`            | Open the repository picker (assign groups, exclude/include) |
 | `Tab`          | Cycle the calendar between all, ungrouped, and each group in use |
+| `m`            | Toggle between everyone's commits and only your own        |
 | `?`            | Toggle the key reference                                  |
 | `q`, `Ctrl+C`  | Quit                                                      |
 
-`Tab` changes only this session; it does not rewrite `--group`, so the next
-run starts from whatever you launched with (or nothing, if you launched
-without it). The set of groups it cycles through is read fresh each time you
-press it, so a group you just created in the picker already has a stop on the
-wheel.
+`Tab` and `m` change only this session; neither rewrites `--group` or
+`--mine`, so the next run starts from whatever you launched with (or nothing,
+if you launched without either). The set of groups `Tab` cycles through is
+read fresh each time you press it, so a group you just created in the picker
+already has a stop on the wheel. `m` refuses to turn mine-only on, with an
+explanation, if you have not configured any identities yet.
 
 ### The repository picker
 
@@ -305,6 +309,7 @@ by hand. `roots list` prints its location:
 ```toml
 roots = ['D:\work_dsi', 'C:\Users\you\source\repos']
 excluded = ['D:\work_dsi\vendored-clone']
+identities = ['you@work.example', 'you@personal.example']
 
 [groups]
 'D:\work_dsi\gitcal' = 'personal'
@@ -318,6 +323,41 @@ for trying a configuration out without disturbing your real one.
 Writes go to a temporary file that is then renamed, so an interrupted write
 cannot leave a half-saved configuration behind. A missing file is a normal
 first run, not an error; a malformed one is reported with its path.
+
+## Tell gitcal which commits are yours
+
+The same person often commits under more than one address — a work email in
+one repository, a personal one in another, sometimes a different name too.
+`identities` is the list of addresses that all count as you:
+
+```sh
+go run . identities add you@work.example
+go run . identities add you@personal.example
+go run . identities                          # list what is configured
+go run . identities remove you@personal.example
+```
+
+`--mine` then limits `calendar` or `activity` to commits authored by one of
+them:
+
+```sh
+go run . calendar --mine
+go run . activity --month 2026-09 --mine --group work
+```
+
+- Matching is by email only, case-insensitively; a name is not compared,
+  since the same address can be attached to different display names on
+  different machines.
+- `--mine` and `--group` combine: the example above shows only your own
+  commits within the `work` group.
+- `--mine` with no identities configured is refused, with the `identities add`
+  command to run, rather than silently showing an empty calendar with no clue
+  why.
+- Identities apply the same way whether or not you pass a folder directly;
+  unlike repository groups, they are not tied to any particular root.
+- In the interactive calendar, commits everyone sees are unaffected, but a
+  commit's detail view marks your own with `(you)` next to the author, even
+  while looking at everyone's history.
 
 ## Scanner behavior
 
@@ -349,8 +389,11 @@ exactly one folder. Large directory trees may take time to scan. Bare
 repositories are not discovered because this increment looks for working
 checkouts with a `.git` marker. Separate worktrees appear separately in `scan`,
 while `activity` and `calendar` deduplicate their commits. Moving or renaming a
-repository on disk leaves its saved group behind, pointing at the old path. All
-commands have been run natively on Windows; macOS still needs verification.
+repository on disk leaves its saved group behind, pointing at the old path.
+Identities match by email only; a co-author or a name-only match is not
+detected, and there is no interactive picker for identities yet, only the
+`identities` command. All commands have been run natively on Windows; macOS
+still needs verification.
 
 ## Verification for this increment
 
@@ -365,8 +408,10 @@ The walkthroughs live in [docs/](docs). Read
 [STEP-3-WALKTHROUGH.md](docs/STEP-3-WALKTHROUGH.md) for monthly activity,
 [STEP-4-WALKTHROUGH.md](docs/STEP-4-WALKTHROUGH.md) for the month grid,
 [STEP-5-WALKTHROUGH.md](docs/STEP-5-WALKTHROUGH.md) for the interactive interface,
-[STEP-6-WALKTHROUGH.md](docs/STEP-6-WALKTHROUGH.md) for saved settings, and
-[STEP-6B-WALKTHROUGH.md](docs/STEP-6B-WALKTHROUGH.md) for the repository picker.
+[STEP-6-WALKTHROUGH.md](docs/STEP-6-WALKTHROUGH.md) for saved settings,
+[STEP-6B-WALKTHROUGH.md](docs/STEP-6B-WALKTHROUGH.md) for the repository picker,
+and [STEP-7-WALKTHROUGH.md](docs/STEP-7-WALKTHROUGH.md) for identities and
+author filtering.
 
 | File               | Purpose                                                         |
 | ------------------ | --------------------------------------------------------------- |
@@ -380,8 +425,8 @@ The walkthroughs live in [docs/](docs). Read
 | `calendar_cli.go`  | Calendar flags, terminal detection, static and day output       |
 | `styles.go`        | Adaptive colour palette and per-repository colour assignment    |
 | `tui.go`           | Bubble Tea model: state, keys, loading and the three views      |
-| `config.go`        | Saved settings, path comparison and the repository filter       |
-| `config_cli.go`    | The `roots` and `repos` commands and the first-run prompt       |
+| `config.go`        | Saved settings, path comparison, and the repository/author filters |
+| `config_cli.go`    | The `roots`, `repos`, and `identities` commands and the first-run prompt |
 | `scan_test.go`     | Original discovery tests                                        |
 | `history_test.go`  | Real-repository integration tests and parser checks             |
 | `activity_test.go` | Multiple repositories, date boundaries, duplicates and failures |
@@ -395,7 +440,7 @@ Five direct dependencies: `golang.org/x/term` for terminal size,
 `github.com/charmbracelet/lipgloss` for adaptive colour, and
 `github.com/pelletier/go-toml/v2` for the settings file. `ansi` is pinned to
 v0.10.x because Bubble Tea's rendering stack is incompatible with v0.11.
-All six commands remain available.
+All seven commands remain available.
 
 The module name is deliberately local for now. When a GitHub repository is chosen,
 we can change it to that repository's import path. Publishing and a license choice

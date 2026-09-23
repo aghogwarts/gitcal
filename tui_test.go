@@ -447,6 +447,39 @@ func TestCyclingGroupsNeverChangesTheLaunchFlag(t *testing.T) {
 	}
 }
 
+// A silent, empty grid would give no clue why nothing showed up; refusing
+// with an explanation matches how --mine already behaves on the command line.
+func TestTogglingMineWithoutIdentitiesExplainsWhy(t *testing.T) {
+	model := newTestModel(t)
+	next, command := model.Update(keyRune("m"))
+	updated := next.(calendarModel)
+	if updated.chosen.authors.mineOnly {
+		t.Fatal("toggling on should have been refused")
+	}
+	if command != nil {
+		t.Fatal("a refused toggle should not start a reload")
+	}
+	if updated.loadErr == nil || !strings.Contains(updated.loadErr.Error(), "gitcal identities add") {
+		t.Fatalf("the refusal did not explain itself: %v", updated.loadErr)
+	}
+}
+
+func TestTogglingMineWithAnIdentityReloadsBackAndForth(t *testing.T) {
+	model := newTestModel(t)
+	model.chosen.config.addIdentity("me@example.invalid")
+	model.chosen.authors = model.chosen.config.authors(false)
+
+	on := press(t, model, keyRune("m"))
+	if !on.chosen.authors.mineOnly || !on.loading {
+		t.Fatalf("mine did not turn on and reload: mineOnly=%v loading=%v", on.chosen.authors.mineOnly, on.loading)
+	}
+
+	off := press(t, on, keyRune("m"))
+	if off.chosen.authors.mineOnly {
+		t.Fatal("a second m should turn mine-only back off")
+	}
+}
+
 func TestRepositoryPickerRendersTheCurrentStateOfEach(t *testing.T) {
 	model := newReposTestModel(t, filepath.FromSlash("/projects/api"), filepath.FromSlash("/projects/vendored"))
 	model.chosen.config.setGroup(filepath.FromSlash("/projects/api"), "work")

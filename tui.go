@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -143,9 +144,23 @@ func (m *calendarModel) beginLoad() tea.Cmd {
 
 	request, chosen, month := m.request, m.chosen, m.month
 	return func() tea.Msg {
-		activity, err := collectActivity(ctx, chosen.roots, month, chosen.filter)
+		activity, err := collectActivity(ctx, chosen.roots, month, chosen.filter, chosen.authors)
 		return activityLoadedMsg{request: request, activity: activity, err: err}
 	}
+}
+
+// toggleMine flips the session's author filter, the same way cycleGroup flips
+// which group is shown. Switching to mine-only with no identities configured
+// would just be an empty grid with no clue why, so that case is refused with
+// an explanation instead.
+func (m calendarModel) toggleMine() (tea.Model, tea.Cmd) {
+	if !m.chosen.authors.mineOnly && len(m.chosen.config.Identities) == 0 {
+		m.loadErr = errors.New("no identities configured; run: gitcal identities add you@example.com")
+		return m, nil
+	}
+	m.chosen.authors.mineOnly = !m.chosen.authors.mineOnly
+	m.mode, m.activity, m.loadErr = viewGrid, Activity{Month: m.month}, nil
+	return m, (&m).beginLoad()
 }
 
 // beginReposScan lists every discovered repository under the configured
@@ -280,6 +295,8 @@ func (m calendarModel) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "tab":
 		return m.cycleGroup()
+	case "m":
+		return m.toggleMine()
 	}
 
 	switch m.mode {
@@ -476,9 +493,10 @@ func (m calendarModel) View() string {
 		Selected:      m.selected.Format("2006-01-02"),
 		EntriesPerDay: m.entriesPerDay,
 		Group:         m.activeGroup,
+		Mine:          m.chosen.authors.mineOnly,
 		Styles:        m.styles,
 		Footer: m.status("←↑↓→ date · [ ] month · enter open · g repos · " +
-			"tab group · t today · r refresh · ? help · q quit"),
+			"tab group · m mine · t today · r refresh · ? help · q quit"),
 	})
 }
 
@@ -572,6 +590,7 @@ var helpKeys = [][2]string{
 	{"r", "Re-read the current month, or rescan repositories in the picker"},
 	{"g", "Open the repository picker: assign groups, exclude/include"},
 	{"Tab", "Cycle the calendar between all, ungrouped, and each group in use"},
+	{"m", "Toggle between everyone's commits and only your own"},
 	{"?", "Close this help"},
 	{"q, Ctrl+C", "Quit"},
 }

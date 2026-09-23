@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -237,12 +238,12 @@ func TestAnExplicitFolderOverridesTheConfiguredRoots(t *testing.T) {
 		t.Fatalf("roots add: exit %d; %s", code, &errOut)
 	}
 
-	chosen, ok := resolveSelection("", "", strings.NewReader(""), &out, &errOut)
+	chosen, ok := resolveSelection("", "", false, strings.NewReader(""), &out, &errOut)
 	if !ok || len(chosen.roots) != 1 || pathKey(chosen.roots[0]) != pathKey(configured) {
 		t.Fatalf("without a folder argument the configured root should win, got %v", chosen.roots)
 	}
 
-	chosen, ok = resolveSelection(override, "", strings.NewReader(""), &out, &errOut)
+	chosen, ok = resolveSelection(override, "", false, strings.NewReader(""), &out, &errOut)
 	if !ok || len(chosen.roots) != 1 || pathKey(chosen.roots[0]) != pathKey(override) {
 		t.Fatalf("the folder argument should override the configuration, got %v", chosen.roots)
 	}
@@ -258,7 +259,7 @@ func TestMissingRootsAskOnlyWhenSomeoneCanAnswer(t *testing.T) {
 
 	// strings.Reader is not a terminal, so the run must explain itself instead
 	// of waiting forever for an answer that cannot arrive.
-	if _, ok := resolveSelection("", "", strings.NewReader("ignored\n"), &out, &errOut); ok {
+	if _, ok := resolveSelection("", "", false, strings.NewReader("ignored\n"), &out, &errOut); ok {
 		t.Fatalf("a non-terminal run should not have prompted")
 	}
 	if !strings.Contains(errOut.String(), "gitcal roots add") {
@@ -325,7 +326,7 @@ func TestGroupsDecideWhichCommitsAreCounted(t *testing.T) {
 		{"personal", 1, "Evening work"},
 	}
 	for _, c := range cases {
-		result, err := collectActivity(context.Background(), []string{root}, month, saved.filter(c.group))
+		result, err := collectActivity(context.Background(), []string{root}, month, saved.filter(c.group), authorFilter{})
 		if err != nil {
 			t.Fatalf("group %q: %v", c.group, err)
 		}
@@ -352,7 +353,7 @@ func TestGroupsDecideWhichCommitsAreCounted(t *testing.T) {
 	}
 
 	// The group travels with the commit, so the detail view can name it.
-	result, err := collectActivity(context.Background(), []string{root}, month, saved.filter(""))
+	result, err := collectActivity(context.Background(), []string{root}, month, saved.filter(""), authorFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,6 +367,150 @@ func TestGroupsDecideWhichCommitsAreCounted(t *testing.T) {
 				t.Fatalf("%q carried groups %v; want [%s]", entry.Commit.Subject, entry.Groups, want)
 			}
 		}
+	}
+}
+
+// historyCommitAuthoredBy is historyCommit with a chosen author, for tests
+// that need to tell one identity's commits apart from someone else's.
+func historyCommitAuthoredBy(t *testing.T, repo, subject, authorEmail, authorDate, committerDate string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", repo, "-c", "commit.gpgsign=false",
+		"-c", "core.hooksPath="+t.TempDir(), "commit", "--quiet", "--allow-empty",
+		"--allow-empty-message", "-m", subject)
+	for _, value := range os.Environ() {
+		if !strings.HasPrefix(strings.ToUpper(value), "GIT_") {
+			cmd.Env = append(cmd.Env, value)
+		}
+	}
+	cmd.Env = append(cmd.Env, "GIT_AUTHOR_NAME=Someone Else", "GIT_AUTHOR_EMAIL="+authorEmail,
+		"GIT_COMMITTER_NAME=Test Committer", "GIT_COMMITTER_EMAIL=committer@example.invalid",
+		"GIT_AUTHOR_DATE="+authorDate, "GIT_COMMITTER_DATE="+committerDate)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create commit: %v\n%s", err, out)
+	}
+}
+
+func totalEntries(activity Activity) int {
+	total := 0
+	for _, day := range activity.Days {
+		total += len(day.Entries)
+	}
+	return total
+}
+
+// historyCommit always authors as ansh@example.invalid, so an identity in a
+// different case still has to match it, the way a real address typed by hand
+// would.
+func TestIdentitiesDecideWhichCommitsCountAsMine(t *testing.T) {
+	root := t.TempDir()
+	repo := activityRepo(t, root, "project")
+	historyCommit(t, repo, "My commit", "2026-09-02T10:00:00Z", "2026-09-02T10:00:00Z")
+	historyCommitAuthoredBy(t, repo, "Someone else's commit", "other@example.invalid",
+		"2026-09-02T11:00:00Z", "2026-09-02T11:00:00Z")
+	month := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+
+	var saved config
+	saved.addIdentity("ANSH@Example.invalid")
+
+	everyone, err := collectActivity(context.Background(), []string{root}, month, repositoryFilter{}, saved.authors(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total := totalEntries(everyone); total != 2 {
+		t.Fatalf("everyone view had %d commits; want 2", total)
+	}
+	for _, day := range everyone.Days {
+		for _, entry := range day.Entries {
+			want := entry.Commit.Subject == "My commit"
+			if entry.Mine != want {
+				t.Fatalf("%q had Mine=%v; want %v", entry.Commit.Subject, entry.Mine, want)
+			}
+		}
+	}
+
+	mine, err := collectActivity(context.Background(), []string{root}, month, repositoryFilter{}, saved.authors(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total := totalEntries(mine); total != 1 {
+		t.Fatalf("mine-only view had %d commits; want 1", total)
+	}
+	if mine.Days[0].Entries[0].Commit.Subject != "My commit" {
+		t.Fatalf("mine-only view kept the wrong commit: %+v", mine.Days[0].Entries[0].Commit)
+	}
+}
+
+func TestIdentitiesCommandsEditTheSavedFile(t *testing.T) {
+	path := tempConfig(t)
+	steps := []struct {
+		args []string
+		code int
+	}{
+		{[]string{"identities", "add", "Me@Example.com"}, 0},
+		{[]string{"identities", "add", "me@example.com"}, 0}, // Case-insensitive duplicate is harmless.
+		{[]string{"identities"}, 0},
+		{[]string{"identities", "remove", "someone@else.invalid"}, 1},
+		{[]string{"identities", "add", "  "}, 1},
+		{[]string{"identities", "wat"}, 2},
+	}
+	for _, step := range steps {
+		var out, errOut bytes.Buffer
+		if code := run(context.Background(), step.args, &out, &errOut); code != step.code {
+			t.Fatalf("%v: exit %d want %d; stdout %s; stderr %s", step.args, code, step.code, &out, &errOut)
+		}
+	}
+
+	saved, err := loadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(saved.Identities) != 1 {
+		t.Fatalf("identities were %v; want exactly one after the duplicate add", saved.Identities)
+	}
+	if !saved.authors(true).isMine("me@EXAMPLE.com") {
+		t.Fatal("matching should be case-insensitive")
+	}
+
+	var out, errOut bytes.Buffer
+	if code := run(context.Background(), []string{"identities", "remove", saved.Identities[0]}, &out, &errOut); code != 0 {
+		t.Fatalf("identities remove: exit %d; %s", code, &errOut)
+	}
+	reloaded, err := loadConfig(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(reloaded.Identities) != 0 {
+		t.Fatalf("identity was not removed: %v", reloaded.Identities)
+	}
+}
+
+// --mine with nothing configured would otherwise just show an empty, silent
+// calendar; refusing outright with an explanation is the same choice already
+// made for a completely unconfigured `roots`.
+func TestMineRequiresAtLeastOneIdentity(t *testing.T) {
+	tempConfig(t)
+	var out, errOut bytes.Buffer
+
+	if _, ok := resolveSelection("", "", true, strings.NewReader(""), &out, &errOut); ok {
+		t.Fatal("--mine with no identities configured should fail, not silently show nothing")
+	}
+	if !strings.Contains(errOut.String(), "gitcal identities add") {
+		t.Fatalf("the failure did not say how to fix it: %s", &errOut)
+	}
+
+	root := t.TempDir()
+	if code := run(context.Background(), []string{"roots", "add", root}, &out, &errOut); code != 0 {
+		t.Fatalf("roots add: exit %d", code)
+	}
+	if code := run(context.Background(), []string{"identities", "add", "me@example.invalid"}, &out, &errOut); code != 0 {
+		t.Fatalf("identities add: exit %d", code)
+	}
+	chosen, ok := resolveSelection("", "", true, strings.NewReader(""), &out, &errOut)
+	if !ok {
+		t.Fatalf("--mine should now succeed: %s", &errOut)
+	}
+	if !chosen.authors.mineOnly || !chosen.authors.isMine("me@example.invalid") {
+		t.Fatalf("the resolved filter did not reflect the configured identity: %+v", chosen.authors)
 	}
 }
 

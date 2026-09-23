@@ -25,8 +25,9 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 	interactive := options.Bool("interactive", false, "browse the calendar with the keyboard even when output is redirected")
 	static := options.Bool("static", false, "print the grid once and exit, even on a terminal")
 	group := options.String("group", "", "only repositories in this group")
+	mine := options.Bool("mine", false, "only commits authored by one of your configured identities")
 	options.Usage = func() {
-		fmt.Fprintln(options.Output(), "Usage: gitcal calendar [--month YYYY-MM] [--day YYYY-MM-DD] [--group NAME] [--per-day N] [--width N] [folder]")
+		fmt.Fprintln(options.Output(), "Usage: gitcal calendar [--month YYYY-MM] [--day YYYY-MM-DD] [--group NAME] [--mine] [--per-day N] [--width N] [folder]")
 		fmt.Fprintln(options.Output(), "Place options before the folder; omit the folder to use your configured folders.")
 		fmt.Fprintln(options.Output(), "On a terminal the calendar is interactive; redirected output is printed once.")
 		options.PrintDefaults()
@@ -78,7 +79,7 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 
 	// Resolving folders first means the first-run prompt is answered before the
 	// alternate screen takes the terminal over.
-	chosen, ok := resolveSelection(options.Arg(0), *group, os.Stdin, out, errOut)
+	chosen, ok := resolveSelection(options.Arg(0), *group, *mine, os.Stdin, out, errOut)
 	if !ok {
 		return 1
 	}
@@ -89,7 +90,7 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 			resolveWidth(out, *width), errOut)
 	}
 
-	activity, err := collectActivity(ctx, chosen.roots, selected, chosen.filter)
+	activity, err := collectActivity(ctx, chosen.roots, selected, chosen.filter, chosen.authors)
 	if err != nil {
 		fmt.Fprintf(errOut, "Error: %v\n", err)
 		return 1
@@ -103,6 +104,7 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 			Today:         time.Now().In(time.Local).Format("2006-01-02"),
 			EntriesPerDay: *entriesPerDay,
 			Group:         *group,
+			Mine:          *mine,
 			Styles:        newStyles(supportsHighlight(out)),
 		}))
 	}

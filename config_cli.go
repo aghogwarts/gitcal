@@ -16,17 +16,21 @@ import (
 // selection is what a command needs in order to know which repositories count:
 // where to look, and which of the results to keep.
 type selection struct {
-	roots  []string
-	filter repositoryFilter
-	group  string
-	config config
-	path   string
+	roots   []string
+	filter  repositoryFilter
+	authors authorFilter
+	group   string
+	mine    bool
+	config  config
+	path    string
 }
 
 // resolveSelection reconciles an explicit folder with the saved configuration.
 // A folder given on the command line wins for that run and ignores grouping,
-// which keeps the original one-off behaviour intact.
-func resolveSelection(folder, group string, in io.Reader, out, errOut io.Writer) (selection, bool) {
+// which keeps the original one-off behaviour intact. Identities, unlike
+// grouping, are not tied to any folder, so --mine applies the same way
+// whether or not a folder was given.
+func resolveSelection(folder, group string, mine bool, in io.Reader, out, errOut io.Writer) (selection, bool) {
 	path, err := defaultConfigPath()
 	if err != nil {
 		fmt.Fprintf(errOut, "Error: %v\n", err)
@@ -37,7 +41,12 @@ func resolveSelection(folder, group string, in io.Reader, out, errOut io.Writer)
 		fmt.Fprintf(errOut, "Error: %v\n", err)
 		return selection{}, false
 	}
-	chosen := selection{config: saved, path: path, group: group}
+	if mine && len(saved.Identities) == 0 {
+		fmt.Fprintln(errOut, "Error: no identities configured. Add yours with:")
+		fmt.Fprintln(errOut, "  gitcal identities add you@example.com")
+		return selection{}, false
+	}
+	chosen := selection{config: saved, path: path, group: group, mine: mine}
 
 	if folder != "" {
 		chosen.roots = []string{folder}
@@ -46,6 +55,7 @@ func resolveSelection(folder, group string, in io.Reader, out, errOut io.Writer)
 			// Grouping lives in the configuration, which this run bypassed.
 			chosen.filter = saved.filter(group)
 		}
+		chosen.authors = saved.authors(mine)
 		return chosen, true
 	}
 
@@ -59,6 +69,7 @@ func resolveSelection(folder, group string, in io.Reader, out, errOut io.Writer)
 	}
 	chosen.roots = saved.Roots
 	chosen.filter = saved.filter(group)
+	chosen.authors = saved.authors(mine)
 	return chosen, true
 }
 
@@ -160,6 +171,59 @@ func count(n int, singular, plural string) string {
 		return "1 " + singular
 	}
 	return fmt.Sprintf("%d %s", n, plural)
+}
+
+// runIdentities mirrors runRoots: list/add/remove over one plain list, with
+// no filesystem check, since an email address has nothing local to validate.
+func runIdentities(args []string, out, errOut io.Writer) int {
+	path, err := defaultConfigPath()
+	if err != nil {
+		fmt.Fprintf(errOut, "Error: %v\n", err)
+		return 1
+	}
+	saved, err := loadConfig(path)
+	if err != nil {
+		fmt.Fprintf(errOut, "Error: %v\n", err)
+		return 1
+	}
+
+	if len(args) == 0 || args[0] == "list" {
+		if len(saved.Identities) == 0 {
+			fmt.Fprintln(out, "No identities configured. Add yours with: gitcal identities add you@example.com")
+			return 0
+		}
+		for _, email := range saved.Identities {
+			fmt.Fprintln(out, email)
+		}
+		fmt.Fprintf(out, "\n%s, from %s\n", count(len(saved.Identities), "identity", "identities"), path)
+		return 0
+	}
+	if len(args) != 2 || (args[0] != "add" && args[0] != "remove") {
+		fmt.Fprintln(errOut, "Usage: gitcal identities [list | add <email> | remove <email>]")
+		return 2
+	}
+
+	if args[0] == "add" {
+		if strings.TrimSpace(args[1]) == "" {
+			fmt.Fprintln(errOut, "Error: an identity needs an email address.")
+			return 1
+		}
+		if !saved.addIdentity(args[1]) {
+			fmt.Fprintln(out, "That identity is already configured.")
+			return 0
+		}
+	} else if !saved.removeIdentity(args[1]) {
+		fmt.Fprintf(errOut, "Error: %s is not one of the configured identities.\n", args[1])
+		return 1
+	}
+
+	if err := saveConfig(path, saved); err != nil {
+		fmt.Fprintf(errOut, "Error: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(out, "%s. %s configured.\n", map[string]string{
+		"add": "Added", "remove": "Removed"}[args[0]], count(len(saved.Identities), "identity", "identities"))
+	return 0
 }
 
 func runRepos(ctx context.Context, args []string, out, errOut io.Writer) int {

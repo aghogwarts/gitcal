@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -15,8 +16,9 @@ func runActivity(ctx context.Context, args []string, out, errOut io.Writer) int 
 	options.SetOutput(errOut)
 	monthText := options.String("month", time.Now().Format("2006-01"), "month to show (YYYY-MM), in local time")
 	group := options.String("group", "", "only repositories in this group")
+	mine := options.Bool("mine", false, "only commits authored by one of your configured identities")
 	options.Usage = func() {
-		fmt.Fprintln(options.Output(), "Usage: gitcal activity [--month YYYY-MM] [--group NAME] [folder]")
+		fmt.Fprintln(options.Output(), "Usage: gitcal activity [--month YYYY-MM] [--group NAME] [--mine] [folder]")
 		fmt.Fprintln(options.Output(), "Place options before the folder; omit the folder to use your configured folders.")
 		options.PrintDefaults()
 	}
@@ -35,16 +37,28 @@ func runActivity(ctx context.Context, args []string, out, errOut io.Writer) int 
 		fmt.Fprintln(errOut, "Error: month must be YYYY-MM with year 0001–9999 and month 01–12 (for example, 2026-09).")
 		return 2
 	}
-	chosen, ok := resolveSelection(options.Arg(0), *group, os.Stdin, out, errOut)
+	chosen, ok := resolveSelection(options.Arg(0), *group, *mine, os.Stdin, out, errOut)
 	if !ok {
 		return 1
 	}
-	result, err := collectActivity(ctx, chosen.roots, month, chosen.filter)
+	result, err := collectActivity(ctx, chosen.roots, month, chosen.filter, chosen.authors)
 	if err != nil {
 		fmt.Fprintf(errOut, "Error: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(out, "Activity for %s — local author dates, all authors and merges\n", result.Month.Format("January 2006"))
+
+	var tags []string
+	if *mine {
+		tags = append(tags, "mine only")
+	}
+	if *group != "" {
+		tags = append(tags, *group+" only")
+	}
+	scope := "all authors and merges"
+	if len(tags) > 0 {
+		scope = strings.Join(tags, " · ")
+	}
+	fmt.Fprintf(out, "Activity for %s — local author dates, %s\n", result.Month.Format("January 2006"), scope)
 	total := 0
 	for _, day := range result.Days {
 		fmt.Fprintf(out, "\n%s (%d commits)\n", day.Date, len(day.Entries))
@@ -63,8 +77,12 @@ func runActivity(ctx context.Context, args []string, out, errOut io.Writer) int 
 	if total == 0 {
 		fmt.Fprintln(out, "No matching commits in the repositories successfully read.")
 	}
-	fmt.Fprintf(out, "\n%d unique commits on %d days; read %d of %d selected repositories (%d discovered).\n",
-		total, len(result.Days), result.ReadRepositories, result.SelectedRepositories, result.DiscoveredRepositories)
+	scanScope := fmt.Sprintf("read %d of %d selected repositories (%d discovered)",
+		result.ReadRepositories, result.SelectedRepositories, result.DiscoveredRepositories)
+	if len(tags) > 0 {
+		scanScope = strings.Join(tags, " · ") + " · " + scanScope
+	}
+	fmt.Fprintf(out, "\n%d unique commits on %d days; %s.\n", total, len(result.Days), scanScope)
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(errOut, "Warning: %v\n", warning)
 	}
