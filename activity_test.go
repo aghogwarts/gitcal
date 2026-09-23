@@ -40,7 +40,7 @@ func TestActivityCombinesCompleteMonthAndDeduplicates(t *testing.T) {
 	historyCommit(t, second, "Later day", "2026-09-03T15:00:00+05:30", "2026-11-03T10:00:00Z")
 	historyCommit(t, second, "Earlier day after conversion", "2026-09-01T23:30:00-07:00", "2026-11-04T10:00:00Z")
 	month := time.Date(2026, 9, 1, 0, 0, 0, 0, time.FixedZone("test local", 19800))
-	result, err := collectActivity(context.Background(), root, month)
+	result, err := collectActivity(context.Background(), []string{root}, month, repositoryFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestActivityMonthBoundariesAndStableTies(t *testing.T) {
 		historyCommit(t, repo, fixture.subject, fixture.date, "2026-11-01T10:00:00Z")
 	}
 	month := time.Date(2026, 9, 1, 0, 0, 0, 0, time.FixedZone("test local", 19800))
-	result, err := collectActivity(context.Background(), root, month)
+	result, err := collectActivity(context.Background(), []string{root}, month, repositoryFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestActivityUsesCalendarMonthsAcrossLeapYearAndDST(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := collectActivity(context.Background(), root, month)
+			result, err := collectActivity(context.Background(), []string{root}, month, repositoryFilter{})
 			if err != nil || len(result.Days) != 1 || result.Days[0].Date != fixture.wantDay {
 				t.Fatalf("calendar month calculation: %+v, %v", result.Days, err)
 			}
@@ -144,7 +144,7 @@ func TestActivityPartialFailuresRemainVisible(t *testing.T) {
 		t.Fatal(err)
 	}
 	month := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	result, err := collectActivity(context.Background(), root, month)
+	result, err := collectActivity(context.Background(), []string{root}, month, repositoryFilter{})
 	if err != nil || result.DiscoveredRepositories != 2 || result.ReadRepositories != 1 || len(result.Warnings) != 2 || len(result.Days) != 1 {
 		t.Fatalf("partial activity: %+v, %v", result, err)
 	}
@@ -158,25 +158,25 @@ func TestActivityPartialFailuresRemainVisible(t *testing.T) {
 func TestActivityEmptyMissingCancelledAndCLIArguments(t *testing.T) {
 	root := t.TempDir()
 	month := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	result, err := collectActivity(context.Background(), root, month)
+	result, err := collectActivity(context.Background(), []string{root}, month, repositoryFilter{})
 	if err != nil || len(result.Days) != 0 || result.DiscoveredRepositories != 0 {
 		t.Fatalf("empty root: %+v, %v", result, err)
 	}
 	activityRepo(t, root, "empty-repository")
-	result, err = collectActivity(context.Background(), root, month)
+	result, err = collectActivity(context.Background(), []string{root}, month, repositoryFilter{})
 	if err != nil || len(result.Days) != 0 || result.ReadRepositories != 1 {
 		t.Fatalf("empty repository: %+v, %v", result, err)
 	}
-	if _, err := collectActivity(context.Background(), filepath.Join(root, "missing"), month); err == nil {
+	if _, err := collectActivity(context.Background(), []string{filepath.Join(root, "missing")}, month, repositoryFilter{}); err == nil {
 		t.Fatal("expected missing root error")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := collectActivity(ctx, root, month); !errors.Is(err, context.Canceled) {
+	if _, err := collectActivity(ctx, []string{root}, month, repositoryFilter{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected cancellation, got %v", err)
 	}
 	for _, args := range [][]string{
-		{"activity"}, {"activity", "--month", "2026-13", root},
+		{"activity", "--month", "2026-13", root},
 		{"activity", "--month", "2026-9", root}, {"activity", "--month", "0000-01", root},
 		{"activity", "--month", "invalid", root}, {"activity", "--unknown", root},
 		{"activity", root, "--month", "2026-09"}, {"activity", root, root},
@@ -185,6 +185,15 @@ func TestActivityEmptyMissingCancelledAndCLIArguments(t *testing.T) {
 		if code := run(context.Background(), args, &out, &errOut); code != 2 {
 			t.Fatalf("args %v: exit %d; want 2", args, code)
 		}
+	}
+	// Without a folder and without configured roots, the run explains itself
+	// rather than treating it as a usage mistake.
+	var noRoots bytes.Buffer
+	if code := run(context.Background(), []string{"activity"}, &noRoots, &noRoots); code != 1 {
+		t.Fatalf("unconfigured activity: exit %d; want 1", code)
+	}
+	if !strings.Contains(noRoots.String(), "gitcal roots add") {
+		t.Fatalf("unconfigured activity did not suggest roots add: %s", &noRoots)
 	}
 	for _, args := range [][]string{{"activity", root}, {"activity", "--month", "2026-09", root}, {"activity", "--help"}} {
 		var out, errOut bytes.Buffer

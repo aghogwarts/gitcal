@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"time"
 )
 
@@ -13,9 +14,10 @@ func runActivity(ctx context.Context, args []string, out, errOut io.Writer) int 
 	options := flag.NewFlagSet("activity", flag.ContinueOnError)
 	options.SetOutput(errOut)
 	monthText := options.String("month", time.Now().Format("2006-01"), "month to show (YYYY-MM), in local time")
+	group := options.String("group", "", "only repositories in this group")
 	options.Usage = func() {
-		fmt.Fprintln(options.Output(), "Usage: gitcal activity [--month YYYY-MM] <folder>")
-		fmt.Fprintln(options.Output(), "Place options before the folder; omit --month for the current month.")
+		fmt.Fprintln(options.Output(), "Usage: gitcal activity [--month YYYY-MM] [--group NAME] [folder]")
+		fmt.Fprintln(options.Output(), "Place options before the folder; omit the folder to use your configured folders.")
 		options.PrintDefaults()
 	}
 	if err := options.Parse(args); err != nil {
@@ -24,7 +26,7 @@ func runActivity(ctx context.Context, args []string, out, errOut io.Writer) int 
 		}
 		return 2
 	}
-	if options.NArg() != 1 {
+	if options.NArg() > 1 {
 		options.Usage()
 		return 2
 	}
@@ -33,7 +35,11 @@ func runActivity(ctx context.Context, args []string, out, errOut io.Writer) int 
 		fmt.Fprintln(errOut, "Error: month must be YYYY-MM with year 0001–9999 and month 01–12 (for example, 2026-09).")
 		return 2
 	}
-	result, err := collectActivity(ctx, options.Arg(0), month)
+	chosen, ok := resolveSelection(options.Arg(0), *group, os.Stdin, out, errOut)
+	if !ok {
+		return 1
+	}
+	result, err := collectActivity(ctx, chosen.roots, month, chosen.filter)
 	if err != nil {
 		fmt.Fprintf(errOut, "Error: %v\n", err)
 		return 1
@@ -57,8 +63,8 @@ func runActivity(ctx context.Context, args []string, out, errOut io.Writer) int 
 	if total == 0 {
 		fmt.Fprintln(out, "No matching commits in the repositories successfully read.")
 	}
-	fmt.Fprintf(out, "\n%d unique commits on %d days; read %d of %d discovered repositories.\n",
-		total, len(result.Days), result.ReadRepositories, result.DiscoveredRepositories)
+	fmt.Fprintf(out, "\n%d unique commits on %d days; read %d of %d selected repositories (%d discovered).\n",
+		total, len(result.Days), result.ReadRepositories, result.SelectedRepositories, result.DiscoveredRepositories)
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(errOut, "Warning: %v\n", warning)
 	}

@@ -32,6 +32,7 @@ type calendarOptions struct {
 	Today         string // YYYY-MM-DD, used only to highlight that cell.
 	Selected      string // YYYY-MM-DD, set only by the interactive view.
 	EntriesPerDay int
+	Group         string // Named below the grid so a filtered month cannot look empty.
 	Footer        string // Replaces the default hint below the grid.
 	Styles        styles // Disabled styles render plain text for pipes and NO_COLOR.
 }
@@ -124,8 +125,12 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 	}
 	output.WriteString(horizontalRule(style, cell, "└", "┴", "┘"))
 
-	fmt.Fprintf(&output, "\n%d unique commits on %d days; read %d of %d discovered repositories.\n",
-		total, len(activity.Days), activity.ReadRepositories, activity.DiscoveredRepositories)
+	scope := fmt.Sprintf("read %d of %d selected repositories (%d discovered)",
+		activity.ReadRepositories, activity.SelectedRepositories, activity.DiscoveredRepositories)
+	if options.Group != "" {
+		scope = style.label.render(options.Group+" only") + " · " + scope
+	}
+	fmt.Fprintf(&output, "\n%d unique commits on %d days; %s.\n", total, len(activity.Days), scope)
 	footer := options.Footer
 	if footer == "" {
 		footer = style.status.render(fmt.Sprintf(
@@ -333,6 +338,10 @@ func renderCommitDetail(entry ActivityEntry, location *time.Location, style styl
 		name := displayText(filepath.Base(repository))
 		fmt.Fprintf(&output, "%s  %s\n", label,
 			style.repository(name).render(displayText(repository)))
+	}
+	if len(entry.Groups) > 0 {
+		fmt.Fprintf(&output, "%s  %s\n", style.label.render("  Group "),
+			style.status.render(strings.Join(entry.Groups, ", ")))
 	}
 	output.WriteString("\n" + style.status.render(
 		"Only the subject line is stored; full commit bodies are not read yet.") + "\n")

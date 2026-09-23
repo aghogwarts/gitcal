@@ -24,9 +24,10 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 	entriesPerDay := options.Int("per-day", defaultEntriesPerDay, `commits shown in each date cell before "+N more"`)
 	interactive := options.Bool("interactive", false, "browse the calendar with the keyboard even when output is redirected")
 	static := options.Bool("static", false, "print the grid once and exit, even on a terminal")
+	group := options.String("group", "", "only repositories in this group")
 	options.Usage = func() {
-		fmt.Fprintln(options.Output(), "Usage: gitcal calendar [--month YYYY-MM] [--day YYYY-MM-DD] [--per-day N] [--width N] <folder>")
-		fmt.Fprintln(options.Output(), "Place options before the folder; omit --month for the current month.")
+		fmt.Fprintln(options.Output(), "Usage: gitcal calendar [--month YYYY-MM] [--day YYYY-MM-DD] [--group NAME] [--per-day N] [--width N] [folder]")
+		fmt.Fprintln(options.Output(), "Place options before the folder; omit the folder to use your configured folders.")
 		fmt.Fprintln(options.Output(), "On a terminal the calendar is interactive; redirected output is printed once.")
 		options.PrintDefaults()
 	}
@@ -36,7 +37,7 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 		}
 		return 2
 	}
-	if options.NArg() != 1 {
+	if options.NArg() > 1 {
 		options.Usage()
 		return 2
 	}
@@ -75,13 +76,20 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 		return 2
 	}
 
+	// Resolving folders first means the first-run prompt is answered before the
+	// alternate screen takes the terminal over.
+	chosen, ok := resolveSelection(options.Arg(0), *group, os.Stdin, out, errOut)
+	if !ok {
+		return 1
+	}
+
 	// The interactive view reads each month itself, so it starts before any scan.
 	if *dayText == "" && !*static && (*interactive || canBeInteractive(out)) {
-		return runInteractiveCalendar(ctx, options.Arg(0), selected, *entriesPerDay,
+		return runInteractiveCalendar(ctx, chosen, selected, *entriesPerDay,
 			resolveWidth(out, *width), errOut)
 	}
 
-	activity, err := collectActivity(ctx, options.Arg(0), selected)
+	activity, err := collectActivity(ctx, chosen.roots, selected, chosen.filter)
 	if err != nil {
 		fmt.Fprintf(errOut, "Error: %v\n", err)
 		return 1
@@ -94,6 +102,7 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 			Width:         resolveWidth(out, *width),
 			Today:         time.Now().In(time.Local).Format("2006-01-02"),
 			EntriesPerDay: *entriesPerDay,
+			Group:         *group,
 			Styles:        newStyles(supportsHighlight(out)),
 		}))
 	}
@@ -129,8 +138,8 @@ func canBeInteractive(out io.Writer) bool {
 	return ok && term.IsTerminal(int(file.Fd())) && term.IsTerminal(int(os.Stdin.Fd()))
 }
 
-func runInteractiveCalendar(ctx context.Context, folder string, month time.Time, entriesPerDay, width int, errOut io.Writer) int {
-	model := newCalendarModel(ctx, folder, month, entriesPerDay, width)
+func runInteractiveCalendar(ctx context.Context, chosen selection, month time.Time, entriesPerDay, width int, errOut io.Writer) int {
+	model := newCalendarModel(ctx, chosen, month, entriesPerDay, width)
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx))
 	finished, err := program.Run()
 	if err != nil && !errors.Is(err, tea.ErrProgramKilled) && !errors.Is(err, context.Canceled) {

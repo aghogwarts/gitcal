@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -14,6 +15,44 @@ import (
 type scanResult struct {
 	Repositories []string
 	Warnings     []error
+}
+
+// scanAll merges several roots into one result. A single unusable root is a
+// warning while others still work; only losing every root is an error, which
+// keeps the one-root case behaving exactly as it did before.
+func scanAll(ctx context.Context, roots []string) (scanResult, error) {
+	var combined scanResult
+	var lastErr error
+	succeeded := 0
+	seen := map[string]bool{}
+	for _, root := range roots {
+		result, err := scan(ctx, root)
+		if err != nil {
+			if ctx.Err() != nil {
+				return combined, err
+			}
+			lastErr = err
+			combined.Warnings = append(combined.Warnings, err)
+			continue
+		}
+		succeeded++
+		combined.Warnings = append(combined.Warnings, result.Warnings...)
+		// Overlapping roots would otherwise report a repository twice.
+		for _, repository := range result.Repositories {
+			if key := pathKey(repository); !seen[key] {
+				seen[key] = true
+				combined.Repositories = append(combined.Repositories, repository)
+			}
+		}
+	}
+	if succeeded == 0 {
+		if lastErr != nil {
+			return scanResult{}, lastErr
+		}
+		return combined, errors.New("no folders to scan; add one with: gitcal roots add <folder>")
+	}
+	sort.Strings(combined.Repositories)
+	return combined, nil
 }
 
 func scan(ctx context.Context, root string) (scanResult, error) {

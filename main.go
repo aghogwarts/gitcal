@@ -14,8 +14,10 @@ import (
 const usage = `Usage:
   gitcal scan <folder>
   gitcal history <repository-folder>
-  gitcal activity [--month YYYY-MM] <folder>
-  gitcal calendar [--month YYYY-MM] [--day YYYY-MM-DD] <folder>
+  gitcal activity [--month YYYY-MM] [--group NAME] [folder]
+  gitcal calendar [--month YYYY-MM] [--day YYYY-MM-DD] [--group NAME] [folder]
+  gitcal roots [list | add <folder> | remove <folder>]
+  gitcal repos [list | set <repository> <group> | exclude <repository> | include <repository>]
   gitcal help
 
 Scan a folder and its subfolders for Git working repositories.
@@ -28,6 +30,11 @@ few commits inside each date and "+N more" for the rest. On a terminal it is
 interactive: arrow keys move between dates, [ and ] change month, Enter opens
 a date and then a commit, and ? lists every key. Redirected output is printed
 once instead. --day lists one date in full. Place options before the folder.
+Roots remembers which folders to scan, so activity and calendar need no folder
+argument; giving one anyway overrides the list for that run. Repos assigns each
+repository a group such as work or personal, or excludes it, and --group then
+limits the calendar to one group. Both are saved in a configuration file you
+can also edit by hand.
 These commands read full histories; large repositories can take time. All
 authors and merges are included. Quote paths containing spaces.
 Use Ctrl+C to cancel.
@@ -51,6 +58,12 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	if args[0] == "calendar" {
 		return runCalendar(ctx, args[1:], out, errOut)
+	}
+	if args[0] == "roots" {
+		return runRoots(args[1:], out, errOut)
+	}
+	if args[0] == "repos" {
+		return runRepos(ctx, args[1:], out, errOut)
 	}
 	if len(args) != 2 || (args[0] != "scan" && args[0] != "history") {
 		fmt.Fprint(errOut, usage)

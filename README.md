@@ -1,19 +1,20 @@
-# gitcal — step 5: an interactive month calendar
+# gitcal — step 6a: remembered folders and repository groups
 
 A learning project for a local Git calendar, written in Go.
 
 The planned interface is a traditional monthly calendar with commits as events
 inside each day, optional repository groups, and filters. **This version discovers
-repositories, reads their history, and presents one month at a time as a calendar
-you can move around with the keyboard.** Repository groups, author filtering, and
-saved settings are not implemented yet.
+repositories, reads their history, presents one month at a time as a calendar you
+can move around with the keyboard, and remembers which folders to scan and which
+group each repository belongs to.** Choosing repositories from inside the
+interactive calendar, author filtering, and caching are not implemented yet.
 `gitcal` is a working name, not a checked or reserved public project name.
 
 ## Requirements
 
 - Install Go 1.26 or newer from https://go.dev/dl/.
 - Install Git and ensure `git --version` works in your terminal.
-- Steps 4 and 5 added third-party dependencies; `go.mod` declares a Go 1.26 floor
+- Steps 4 to 6 added third-party dependencies; `go.mod` declares a Go 1.26 floor
   because of them. `go run` and `go build` download them on first use.
 
 ## Run
@@ -53,7 +54,8 @@ go build -o gitcal .
 
 Run `go test ./...` for tests and `go vet ./...` for static checks.
 The tests use temporary repositories and require Git. A symlink test may skip
-on Windows when the current account cannot create symlinks.
+on Windows when the current account cannot create symlinks. Tests never read or
+write your real settings; they point `GITCAL_CONFIG` at a temporary file.
 
 ## Read one repository's history
 
@@ -179,6 +181,7 @@ go run . calendar --day 2026-09-18 "path/to/projects"
 | `--width`       | Grid width in columns; `0` (default) detects the terminal      |
 | `--interactive` | Force the keyboard interface even when output is redirected    |
 | `--static`      | Force a single printed grid even on a terminal                 |
+| `--group`       | Only repositories in this group; see the next section          |
 
 ### Keys
 
@@ -216,6 +219,83 @@ go run . calendar --day 2026-09-18 "path/to/projects"
 - Month selection, timezone handling, deduplication, author inclusion, and
   warning behavior are identical to `activity`.
 
+## Remember folders and group repositories
+
+Typing a folder path on every run gets old, and not every repository is yours.
+`roots` remembers where to look and `repos` decides what counts.
+
+```sh
+go run . roots add "path/to/projects"     # do this once
+go run . calendar                         # no folder argument needed
+```
+
+`roots list` prints the remembered folders and where they are stored;
+`roots remove` drops one. Several folders are allowed, which is how a projects
+folder and a separate work folder can appear in the same calendar.
+
+`repos` lists every repository found under those folders with its group, then
+assigns them:
+
+```sh
+go run . repos                                   # list with current groups
+go run . repos set "path/to/projects/blog" personal
+go run . repos set "path/to/work/api" work
+go run . repos set "path/to/work/api" -          # back to ungrouped
+go run . repos exclude "path/to/projects/vendored"
+go run . repos include "path/to/projects/vendored"
+```
+
+Group names are yours to invent; `work` and `personal` are only suggestions.
+Each repository has exactly one group, and anything unassigned is `ungrouped`.
+`--group` then limits `calendar` and `activity` to one of them:
+
+```sh
+go run . calendar --group personal
+go run . activity --month 2026-09 --group work
+```
+
+- The first run with nothing configured asks for a folder and saves it. When
+  nothing can answer, because output is redirected or a script is running it,
+  the run explains the `roots add` command instead of waiting.
+- **Passing a folder still works and overrides the remembered list for that
+  run**, so every earlier example in this README behaves as it did before.
+  An overriding folder ignores saved exclusions too; combine it with `--group`
+  to apply the saved grouping.
+- Excluded repositories are dropped before their history is read, so excluding
+  a large dependency clone makes the scan faster as well as quieter.
+- Filtering changes only which repositories are read. Deduplication, timezone
+  handling, and counting rules are unchanged. The summary line names the active
+  group and reports both selected and discovered repository counts, so a
+  filtered month cannot be mistaken for a quiet one.
+- Paths are compared after resolving symlinks and, on Windows, ignoring case,
+  so `C:\Projects\Api` and `c:\projects\api\` are the same repository.
+
+### The configuration file
+
+Settings live in one TOML file, written by the commands above and safe to edit
+by hand. `roots list` prints its location:
+
+- Windows: `%AppData%\gitcal\config.toml`
+- macOS: `~/Library/Application Support/gitcal/config.toml`
+- Linux: `~/.config/gitcal/config.toml`
+
+```toml
+roots = ['D:\work_dsi', 'C:\Users\you\source\repos']
+excluded = ['D:\work_dsi\vendored-clone']
+
+[groups]
+'D:\work_dsi\gitcal' = 'personal'
+'D:\work_dsi\api' = 'work'
+```
+
+Single quotes make these *literal* strings, which is why Windows paths need no
+backslash escaping. Set `GITCAL_CONFIG` to use a different file, which is handy
+for trying a configuration out without disturbing your real one.
+
+Writes go to a temporary file that is then renamed, so an interrupted write
+cannot leave a half-saved configuration behind. A missing file is a normal
+first run, not an error; a malformed one is reported with its path.
+
 ## Scanner behavior
 
 - Lists absolute repository paths, sorted for repeatable output.
@@ -237,26 +317,33 @@ Exit codes: `0` success/help (including empty results), `1` failure or incomplet
 
 ## Intentional limits of this increment
 
-One scan root or history repository per invocation; no remembered roots, groups,
-caching, or automatic dependency-folder exclusions. The interactive calendar
-re-reads every repository on each month change and does not scroll the grid
-itself. Large directory trees may take time to scan. Bare repositories are
-not discovered because this increment looks for working checkouts with a `.git`
-marker. Separate worktrees appear separately in `scan`, while `activity` and
-`calendar` deduplicate their commits. The `scan`, `activity`, and `calendar`
-commands have been run natively on Windows; macOS still needs verification.
+Repositories are grouped and excluded from the command line only; choosing them
+from inside the interactive calendar is the next step. A repository belongs to
+one group, so overlapping categories are not expressible. There is no caching
+and no automatic dependency-folder exclusion, so the interactive calendar still
+re-reads every selected repository on each month change, and it does not scroll
+the grid itself. `scan` and `history` still take exactly one folder. Large
+directory trees may take time to scan. Bare repositories are not discovered
+because this increment looks for working checkouts with a `.git` marker.
+Separate worktrees appear separately in `scan`, while `activity` and `calendar`
+deduplicate their commits. Moving or renaming a repository on disk leaves its
+saved group behind, pointing at the old path. All commands have been run
+natively on Windows; macOS still needs verification.
 
 ## Verification for this increment
 
-See `VERIFICATION.md` for the checks performed on this increment and their limits.
+See [docs/VERIFICATION.md](docs/VERIFICATION.md) for the checks performed on this
+increment and their limits.
 
 ## Learn the code
 
-Read [WALKTHROUGH.md](WALKTHROUGH.md) for discovery,
-[STEP-2-WALKTHROUGH.md](STEP-2-WALKTHROUGH.md) for single-repository history,
-[STEP-3-WALKTHROUGH.md](STEP-3-WALKTHROUGH.md) for monthly activity,
-[STEP-4-WALKTHROUGH.md](STEP-4-WALKTHROUGH.md) for the month grid, and
-[STEP-5-WALKTHROUGH.md](STEP-5-WALKTHROUGH.md) for the interactive interface.
+The walkthroughs live in [docs/](docs). Read
+[WALKTHROUGH.md](docs/WALKTHROUGH.md) for discovery,
+[STEP-2-WALKTHROUGH.md](docs/STEP-2-WALKTHROUGH.md) for single-repository history,
+[STEP-3-WALKTHROUGH.md](docs/STEP-3-WALKTHROUGH.md) for monthly activity,
+[STEP-4-WALKTHROUGH.md](docs/STEP-4-WALKTHROUGH.md) for the month grid,
+[STEP-5-WALKTHROUGH.md](docs/STEP-5-WALKTHROUGH.md) for the interactive interface,
+and [STEP-6-WALKTHROUGH.md](docs/STEP-6-WALKTHROUGH.md) for saved settings.
 
 | File               | Purpose                                                         |
 | ------------------ | --------------------------------------------------------------- |
@@ -270,18 +357,22 @@ Read [WALKTHROUGH.md](WALKTHROUGH.md) for discovery,
 | `calendar_cli.go`  | Calendar flags, terminal detection, static and day output       |
 | `styles.go`        | Adaptive colour palette and per-repository colour assignment    |
 | `tui.go`           | Bubble Tea model: state, keys, loading and the three views      |
+| `config.go`        | Saved settings, path comparison and the repository filter       |
+| `config_cli.go`    | The `roots` and `repos` commands and the first-run prompt       |
 | `scan_test.go`     | Original discovery tests                                        |
 | `history_test.go`  | Real-repository integration tests and parser checks             |
 | `activity_test.go` | Multiple repositories, date boundaries, duplicates and failures |
 | `calendar_test.go` | Layout alignment, week placement, overflow and highlighting     |
 | `tui_test.go`      | Key handling, month clamping, stale scans and view transitions  |
+| `config_test.go`   | Save/load round trips, path matching, filtering and the commands |
 
-Four direct dependencies: `golang.org/x/term` for terminal size,
+Five direct dependencies: `golang.org/x/term` for terminal size,
 `github.com/charmbracelet/x/ansi` for display-width truncation,
-`github.com/charmbracelet/bubbletea` for the interactive interface, and
-`github.com/charmbracelet/lipgloss` for adaptive colour. `ansi` is pinned to
+`github.com/charmbracelet/bubbletea` for the interactive interface,
+`github.com/charmbracelet/lipgloss` for adaptive colour, and
+`github.com/pelletier/go-toml/v2` for the settings file. `ansi` is pinned to
 v0.10.x because Bubble Tea's rendering stack is incompatible with v0.11.
-All four commands remain available.
+All six commands remain available.
 
 The module name is deliberately local for now. When a GitHub repository is chosen,
 we can change it to that repository's import path. Publishing and a license choice

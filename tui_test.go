@@ -13,7 +13,7 @@ import (
 func newTestModel(t *testing.T, entries ...ActivityEntry) calendarModel {
 	t.Helper()
 	month := calendarMonth(2026, time.September)
-	model := newCalendarModel(context.Background(), "projects", month, 3, 120)
+	model := newCalendarModel(context.Background(), selection{roots: []string{"projects"}}, month, 3, 120)
 	model.request = 1
 	if len(entries) > 0 {
 		model.activity = Activity{

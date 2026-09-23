@@ -32,7 +32,7 @@ type activityLoadedMsg struct {
 
 type calendarModel struct {
 	root          context.Context
-	folder        string
+	chosen        selection
 	entriesPerDay int
 
 	month    time.Time
@@ -51,10 +51,10 @@ type calendarModel struct {
 	styles        styles
 }
 
-func newCalendarModel(ctx context.Context, folder string, month time.Time, entriesPerDay, width int) calendarModel {
+func newCalendarModel(ctx context.Context, chosen selection, month time.Time, entriesPerDay, width int) calendarModel {
 	return calendarModel{
 		root:          ctx,
-		folder:        folder,
+		chosen:        chosen,
 		entriesPerDay: entriesPerDay,
 		month:         month,
 		selected:      startOfMonth(month),
@@ -88,9 +88,9 @@ func (m *calendarModel) beginLoad() tea.Cmd {
 	m.loading = true
 	m.loadErr = nil
 
-	request, folder, month := m.request, m.folder, m.month
+	request, chosen, month := m.request, m.chosen, m.month
 	return func() tea.Msg {
-		activity, err := collectActivity(ctx, folder, month)
+		activity, err := collectActivity(ctx, chosen.roots, month, chosen.filter)
 		return activityLoadedMsg{request: request, activity: activity, err: err}
 	}
 }
@@ -257,6 +257,7 @@ func (m calendarModel) View() string {
 		Today:         time.Now().In(m.month.Location()).Format("2006-01-02"),
 		Selected:      m.selected.Format("2006-01-02"),
 		EntriesPerDay: m.entriesPerDay,
+		Group:         m.chosen.group,
 		Styles:        m.styles,
 		Footer:        m.status("←↑↓→ date · [ ] month · enter open · t today · r refresh · ? help · q quit"),
 	})
