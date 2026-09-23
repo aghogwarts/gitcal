@@ -48,6 +48,7 @@ type calendarModel struct {
 
 	width, height int
 	help          bool
+	styles        styles
 }
 
 func newCalendarModel(ctx context.Context, folder string, month time.Time, entriesPerDay, width int) calendarModel {
@@ -59,6 +60,7 @@ func newCalendarModel(ctx context.Context, folder string, month time.Time, entri
 		selected:      startOfMonth(month),
 		width:         width,
 		height:        24,
+		styles:        newStyles(true),
 	}
 }
 
@@ -231,18 +233,18 @@ func (m calendarModel) selectedEntries() []ActivityEntry {
 
 func (m calendarModel) View() string {
 	if m.help {
-		return helpText
+		return m.helpView()
 	}
 	switch m.mode {
 	case viewDay:
-		return renderDayList(m.activity, m.selected.Format("2006-01-02"), m.commit, m.width, m.height-4) +
+		return renderDayList(m.activity, m.selected.Format("2006-01-02"), m.commit, m.width, m.height-4, m.styles) +
 			"\n" + m.status("enter detail · esc back · ↑↓ move · q quit")
 	case viewCommit:
 		entries := m.selectedEntries()
 		if m.commit >= len(entries) {
 			return m.status("no commit selected · esc back")
 		}
-		return renderCommitDetail(entries[m.commit], m.month.Location()) +
+		return renderCommitDetail(entries[m.commit], m.month.Location(), m.styles) +
 			"\n" + m.status("esc back · q quit")
 	}
 
@@ -254,8 +256,8 @@ func (m calendarModel) View() string {
 		Width:         m.width,
 		Today:         time.Now().In(m.month.Location()).Format("2006-01-02"),
 		Selected:      m.selected.Format("2006-01-02"),
-		Highlight:     true,
 		EntriesPerDay: m.entriesPerDay,
+		Styles:        m.styles,
 		Footer:        m.status("←↑↓→ date · [ ] month · enter open · t today · r refresh · ? help · q quit"),
 	})
 }
@@ -265,28 +267,49 @@ func (m calendarModel) View() string {
 func (m calendarModel) status(keys string) string {
 	switch {
 	case m.loading:
-		return fmt.Sprintf("Reading %s… (q cancels)", m.month.Format("January 2006"))
+		return m.styles.loading.render(fmt.Sprintf("Reading %s… (q cancels)", m.month.Format("January 2006")))
 	case m.loadErr != nil:
-		return "Error: " + displayText(m.loadErr.Error()) + " · r retries · q quits"
+		return m.styles.failure.render("Error: "+displayText(m.loadErr.Error())) +
+			m.styles.status.render(" · r retries · q quits")
 	case len(m.activity.Warnings) > 0:
-		return fmt.Sprintf("%d repositories could not be read · %s", len(m.activity.Warnings), keys)
+		return m.styles.failure.render(fmt.Sprintf("%d repositories could not be read", len(m.activity.Warnings))) +
+			m.styles.status.render(" · "+keys)
 	default:
-		return strings.TrimSpace(m.selected.Format("Monday, 2 January 2006") + " · " + keys)
+		return m.styles.status.render(strings.TrimSpace(
+			m.selected.Format("Monday, 2 January 2006") + " · " + keys))
 	}
 }
 
-const helpText = `gitcal calendar — keys
+var helpKeys = [][2]string{
+	{"← → ↑ ↓", "Move between dates (stops at the month's edge)"},
+	{"h l k j", "The same, without the arrow keys"},
+	{"[ ]", "Previous / next month, also PgUp and PgDn"},
+	{"Enter", "Open the selected date, then the selected commit"},
+	{"Esc", "Back up one level"},
+	{"t", "Jump to today"},
+	{"r", "Re-read the current month"},
+	{"?", "Close this help"},
+	{"q, Ctrl+C", "Quit"},
+}
 
-  ← → ↑ ↓      Move between dates (stops at the month's edge)
-  h l k j      The same, without the arrow keys
-  [ ]          Previous / next month, also PgUp and PgDn
-  Enter        Open the selected date, then the selected commit
-  Esc          Back up one level
-  t            Jump to today
-  r            Re-read the current month
-  ?            Close this help
-  q, Ctrl+C    Quit
-
-Each month change re-reads every repository's history, so a large projects
-folder takes a moment. Caching is a later step.
-`
+func (m calendarModel) helpView() string {
+	var output strings.Builder
+	output.WriteString(m.styles.heading.render("gitcal calendar — keys") + "\n\n")
+	for _, binding := range helpKeys {
+		fmt.Fprintf(&output, "  %s  %s\n",
+			m.styles.key.render(fmt.Sprintf("%-11s", binding[0])), binding[1])
+	}
+	output.WriteString("\n" + m.styles.heading.render("Colours") + "\n\n")
+	output.WriteString("  " + m.styles.today.render(" 9 ") + "  today" +
+		"    " + m.styles.selected.render(" 9 ") + "  selected date\n")
+	output.WriteString("  " + m.styles.weekendDate.render(" 9 ") + "  weekend" +
+		"  " + m.styles.quietDate.render(" 9 ") + "  no commits\n")
+	output.WriteString("\n  Each repository keeps its own colour, chosen from its name:\n  ")
+	for _, name := range []string{"api", "website", "tooling", "docs"} {
+		output.WriteString(m.styles.repository(name).render(name) + "  ")
+	}
+	output.WriteString("\n\n" + m.styles.status.render(
+		"Each month change re-reads every repository's history, so a large\n"+
+			"projects folder takes a moment. Caching is a later step.") + "\n")
+	return output.String()
+}

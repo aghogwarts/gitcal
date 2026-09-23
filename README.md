@@ -202,8 +202,14 @@ go run . calendar --day 2026-09-18 "path/to/projects"
 - Cells carry the commit subject, adding the repository name and then the time
   as the terminal grows. Text is shortened by **display width**, so emoji and
   East Asian characters stay aligned.
-- Today is shown in reverse video and the selected date underlined, so a date
-  that is both remains distinguishable. Static output honours `NO_COLOR`.
+- Colours adapt to light and dark terminal backgrounds, and degrade on
+  terminals with limited colour support. Redirected output and `NO_COLOR`
+  produce plain text.
+- Today is a filled badge, the selected date a lighter one, and a date that is
+  both adds an underline. Weekends are tinted, and dates with no commits are
+  dimmed so active dates stand out.
+- Each repository keeps its own colour, derived from its name so it stays the
+  same as months change and as other repositories come and go.
 - `--day` and `--month` cannot be combined: a date already identifies its month.
 - The summary below the grid counts every commit in the month, not the visible
   ones. Use `--day` or raise `--per-day` to see the rest.
@@ -262,6 +268,7 @@ Read [WALKTHROUGH.md](WALKTHROUGH.md) for discovery,
 | `activity_cli.go`  | Activity flags and agenda output                                |
 | `calendar.go`      | Month arithmetic and all layout, with no terminal access        |
 | `calendar_cli.go`  | Calendar flags, terminal detection, static and day output       |
+| `styles.go`        | Adaptive colour palette and per-repository colour assignment    |
 | `tui.go`           | Bubble Tea model: state, keys, loading and the three views      |
 | `scan_test.go`     | Original discovery tests                                        |
 | `history_test.go`  | Real-repository integration tests and parser checks             |
@@ -269,11 +276,12 @@ Read [WALKTHROUGH.md](WALKTHROUGH.md) for discovery,
 | `calendar_test.go` | Layout alignment, week placement, overflow and highlighting     |
 | `tui_test.go`      | Key handling, month clamping, stale scans and view transitions  |
 
-Three direct dependencies: `golang.org/x/term` for terminal size,
-`github.com/charmbracelet/x/ansi` for display-width truncation, and
-`github.com/charmbracelet/bubbletea` for the interactive interface. `ansi` is
-pinned to v0.10.x because Bubble Tea's rendering stack is incompatible with
-v0.11. All four commands remain available.
+Four direct dependencies: `golang.org/x/term` for terminal size,
+`github.com/charmbracelet/x/ansi` for display-width truncation,
+`github.com/charmbracelet/bubbletea` for the interactive interface, and
+`github.com/charmbracelet/lipgloss` for adaptive colour. `ansi` is pinned to
+v0.10.x because Bubble Tea's rendering stack is incompatible with v0.11.
+All four commands remain available.
 
 The module name is deliberately local for now. When a GitHub repository is chosen,
 we can change it to that repository's import path. Publishing and a license choice

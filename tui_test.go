@@ -142,8 +142,8 @@ func TestViewDistinguishesTodayFromTheSelection(t *testing.T) {
 	model := newTestModel(t)
 	model.selected = time.Date(2026, time.September, 4, 0, 0, 0, 0, calendarZone)
 	view := model.View()
-	if !strings.Contains(view, "\x1b[1;4m 4 \x1b[0m") {
-		t.Fatalf("the selected date should be underlined:\n%s", view)
+	if styleOf(cellFor(t, view, "4")) == styleOf(cellFor(t, view, "5")) {
+		t.Fatalf("the selected date should not look like an ordinary one:\n%s", view)
 	}
 	if strings.Contains(view, "Use --day") {
 		t.Fatal("the interactive footer should replace the command-line hint")
@@ -199,7 +199,7 @@ func TestDayListScrollsToKeepTheSelectionVisible(t *testing.T) {
 		Month: calendarMonth(2026, time.September),
 		Days:  []ActivityDay{{Date: "2026-09-01", Entries: entries}},
 	}
-	listed := renderDayList(activity, "2026-09-01", 39, 100, 10)
+	listed := renderDayList(activity, "2026-09-01", 39, 100, 10, newStyles(false))
 	if !strings.Contains(listed, "↑ 30 earlier") {
 		t.Fatalf("scrolling to the end should report what is above:\n%s", listed)
 	}
@@ -209,7 +209,7 @@ func TestDayListScrollsToKeepTheSelectionVisible(t *testing.T) {
 	if strings.Count(listed, "▸ ") != 1 {
 		t.Fatalf("exactly one commit should be marked:\n%s", listed)
 	}
-	if empty := renderDayList(activity, "2026-09-02", 0, 100, 10); !strings.Contains(empty, "No commits") {
+	if empty := renderDayList(activity, "2026-09-02", 0, 100, 10, newStyles(false)); !strings.Contains(empty, "No commits") {
 		t.Fatal("an empty date should say so")
 	}
 }

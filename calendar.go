@@ -31,9 +31,9 @@ type calendarOptions struct {
 	Width         int    // Total columns available for the grid.
 	Today         string // YYYY-MM-DD, used only to highlight that cell.
 	Selected      string // YYYY-MM-DD, set only by the interactive view.
-	Highlight     bool   // Emit ANSI codes; false for pipes and NO_COLOR.
 	EntriesPerDay int
 	Footer        string // Replaces the default hint below the grid.
+	Styles        styles // Disabled styles render plain text for pipes and NO_COLOR.
 }
 
 // cellWidth divides the terminal between seven columns and the eight vertical
@@ -71,19 +71,27 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 	offset := (int(first.Weekday()) + 6) % 7
 	daysInMonth := first.AddDate(0, 1, -1).Day()
 
-	var output strings.Builder
-	fmt.Fprintf(&output, "%s — local author dates, all authors and merges\n\n", first.Format("January 2006"))
+	style := options.Styles
+	bar := style.border.render("│")
 
-	output.WriteString(horizontalRule(cell, "┌", "┬", "┐"))
-	output.WriteString("│")
-	for _, name := range weekdayNames(text) {
-		output.WriteString(cellContents(name, cell))
-		output.WriteString("│")
+	var output strings.Builder
+	fmt.Fprintf(&output, "%s\n\n", style.heading.render(first.Format("January 2006")+
+		" — local author dates, all authors and merges"))
+
+	output.WriteString(horizontalRule(style, cell, "┌", "┬", "┐"))
+	output.WriteString(bar)
+	for column, name := range weekdayNames(text) {
+		header := style.weekday
+		if isWeekend(column) {
+			header = style.weekendName
+		}
+		output.WriteString(cellContents(header.render(name), cell))
+		output.WriteString(bar)
 	}
 	output.WriteString("\n")
 
 	for start := 1 - offset; start <= daysInMonth; start += 7 {
-		output.WriteString(horizontalRule(cell, "├", "┼", "┤"))
+		output.WriteString(horizontalRule(style, cell, "├", "┼", "┤"))
 
 		// Every cell in a week shares the tallest cell's height, which keeps
 		// the vertical rules aligned down the whole grid.
@@ -95,33 +103,34 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 				continue
 			}
 			date := time.Date(month.Year(), month.Month(), number, 0, 0, 0, 0, location)
-			columns[column] = dayLines(date, byDate[date.Format("2006-01-02")], options, text, location)
+			columns[column] = dayLines(date, byDate[date.Format("2006-01-02")], options, text, location, isWeekend(column))
 			if len(columns[column]) > height {
 				height = len(columns[column])
 			}
 		}
 
 		for row := 0; row < height; row++ {
-			output.WriteString("│")
+			output.WriteString(bar)
 			for _, lines := range columns {
 				line := ""
 				if row < len(lines) {
 					line = lines[row]
 				}
 				output.WriteString(cellContents(line, cell))
-				output.WriteString("│")
+				output.WriteString(bar)
 			}
 			output.WriteString("\n")
 		}
 	}
-	output.WriteString(horizontalRule(cell, "└", "┴", "┘"))
+	output.WriteString(horizontalRule(style, cell, "└", "┴", "┘"))
 
 	fmt.Fprintf(&output, "\n%d unique commits on %d days; read %d of %d discovered repositories.\n",
 		total, len(activity.Days), activity.ReadRepositories, activity.DiscoveredRepositories)
 	footer := options.Footer
 	if footer == "" {
-		footer = fmt.Sprintf("Showing up to %d commits per date. Use --day YYYY-MM-DD for one date's full list.",
-			options.EntriesPerDay)
+		footer = style.status.render(fmt.Sprintf(
+			"Showing up to %d commits per date. Use --day YYYY-MM-DD for one date's full list.",
+			options.EntriesPerDay))
 	}
 	fmt.Fprintln(&output, footer)
 	return output.String()
@@ -129,19 +138,28 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 
 // dayLines builds one cell's text: the date number, then as many entries as
 // fit the caller's limit, then a count of whatever had to be left out.
-func dayLines(date time.Time, entries []ActivityEntry, options calendarOptions, text int, location *time.Location) []string {
-	number := strconv.Itoa(date.Day())
-	if options.Highlight {
-		// Today and the selection need distinct styles, and one date can be both.
-		key := date.Format("2006-01-02")
-		switch {
-		case key == options.Today && key == options.Selected:
-			number = "\x1b[1;4;7m " + number + " \x1b[0m"
-		case key == options.Today:
-			number = "\x1b[7m " + number + " \x1b[0m"
-		case key == options.Selected:
-			number = "\x1b[1;4m " + number + " \x1b[0m"
-		}
+func dayLines(date time.Time, entries []ActivityEntry, options calendarOptions, text int, location *time.Location, weekend bool) []string {
+	style := options.Styles
+	key := date.Format("2006-01-02")
+	number := " " + strconv.Itoa(date.Day()) + " "
+
+	// Today and the selection are badges, and one date can be both. Otherwise
+	// the weekend tint and whether the date has any commits decide the colour.
+	switch {
+	case key == options.Today && key == options.Selected:
+		number = style.todaySelected.render(number)
+	case key == options.Today:
+		number = style.today.render(number)
+	case key == options.Selected:
+		number = style.selected.render(number)
+	case len(entries) > 0 && weekend:
+		number = style.weekendDate.render(number)
+	case len(entries) > 0:
+		number = style.date.render(number)
+	case weekend:
+		number = style.quietWeekend.render(number)
+	default:
+		number = style.quietDate.render(number)
 	}
 	lines := []string{number}
 
@@ -150,24 +168,30 @@ func dayLines(date time.Time, entries []ActivityEntry, options calendarOptions, 
 		shown = shown[:options.EntriesPerDay]
 	}
 	for _, entry := range shown {
-		lines = append(lines, entryLine(entry, text, location))
+		lines = append(lines, entryLine(entry, style, text, location))
 	}
 	if hidden := len(entries) - len(shown); hidden > 0 {
-		lines = append(lines, fmt.Sprintf("+%d more", hidden))
+		lines = append(lines, style.more.render(fmt.Sprintf("+%d more", hidden)))
 	}
 	return lines
 }
 
 // entryLine adds fields only while they still leave room for the subject.
-func entryLine(entry ActivityEntry, text int, location *time.Location) string {
+func entryLine(entry ActivityEntry, style styles, text int, location *time.Location) string {
 	line := displayText(entry.Commit.Subject)
 	if text >= textWidthForRepository && len(entry.Repositories) > 0 {
-		line = displayText(filepath.Base(entry.Repositories[0])) + ": " + line
+		name := displayText(filepath.Base(entry.Repositories[0]))
+		line = style.repository(name).render(name) + ": " + line
 	}
 	if text >= textWidthForTime {
-		line = entry.Commit.AuthoredAt.In(location).Format("15:04") + " " + line
+		line = style.time.render(entry.Commit.AuthoredAt.In(location).Format("15:04")) + " " + line
 	}
 	return line
+}
+
+// Monday starts the week, so Saturday and Sunday are the last two columns.
+func isWeekend(column int) bool {
+	return column >= 5
 }
 
 func weekdayNames(text int) []string {
@@ -177,18 +201,23 @@ func weekdayNames(text int) []string {
 	return []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
 }
 
-func horizontalRule(cell int, left, join, right string) string {
+func horizontalRule(style styles, cell int, left, join, right string) string {
 	segments := make([]string, calendarColumns)
 	for i := range segments {
 		segments[i] = strings.Repeat("─", cell)
 	}
-	return left + strings.Join(segments, join) + right + "\n"
+	return style.border.render(left+strings.Join(segments, join)+right) + "\n"
 }
 
 // cellContents shortens and pads by display width, so East Asian characters,
-// emoji, and the highlight's invisible escape codes all stay aligned.
+// emoji, and the styles' invisible escape codes all stay aligned.
 func cellContents(line string, cell int) string {
 	line = ansi.Truncate(line, cell-2, "…")
+	// Shortening can cut a style's closing sequence, which would let colour
+	// bleed across the rest of the row.
+	if strings.Contains(line, "\x1b") && !strings.HasSuffix(line, "\x1b[0m") {
+		line += "\x1b[0m"
+	}
 	gap := cell - 2 - ansi.StringWidth(line)
 	if gap < 0 {
 		gap = 0
@@ -230,12 +259,12 @@ func entriesForDate(activity Activity, date string) []ActivityEntry {
 
 // renderDayList is the interactive counterpart to renderDay: one line per
 // commit, scrolled to keep the selection visible when a date is busy.
-func renderDayList(activity Activity, date string, selected, width, height int) string {
+func renderDayList(activity Activity, date string, selected, width, height int, style styles) string {
 	entries := entriesForDate(activity, date)
 	var output strings.Builder
-	fmt.Fprintf(&output, "%s — %d commits\n\n", date, len(entries))
+	fmt.Fprintf(&output, "%s\n\n", style.heading.render(fmt.Sprintf("%s — %d commits", date, len(entries))))
 	if len(entries) == 0 {
-		output.WriteString("  No commits on this date.\n")
+		output.WriteString(style.status.render("  No commits on this date.") + "\n")
 		return output.String()
 	}
 
@@ -259,7 +288,7 @@ func renderDayList(activity Activity, date string, selected, width, height int) 
 	}
 
 	if start > 0 {
-		fmt.Fprintf(&output, "  ↑ %d earlier\n", start)
+		output.WriteString(style.status.render(fmt.Sprintf("  ↑ %d earlier", start)) + "\n")
 	}
 	for index := start; index < end; index++ {
 		commit := entries[index].Commit
@@ -267,34 +296,45 @@ func renderDayList(activity Activity, date string, selected, width, height int) 
 		if index == selected {
 			marker = "▸ "
 		}
-		line := fmt.Sprintf("%s%s  %.12s  %s", marker,
-			commit.AuthoredAt.In(activity.Month.Location()).Format("15:04"),
-			commit.Hash, displayText(commit.Subject))
+		line := marker + style.time.render(
+			commit.AuthoredAt.In(activity.Month.Location()).Format("15:04")) +
+			"  " + style.label.render(fmt.Sprintf("%.12s", commit.Hash)) +
+			"  " + displayText(commit.Subject)
 		if repositories := entries[index].Repositories; len(repositories) > 0 {
-			line += "  · " + displayText(filepath.Base(repositories[0]))
+			name := displayText(filepath.Base(repositories[0]))
+			line += "  · " + style.repository(name).render(name)
 		}
-		output.WriteString(ansi.Truncate(line, width, "…") + "\n")
+		line = ansi.Truncate(line, width, "…")
+		if index == selected {
+			line = style.row.render(line)
+		}
+		output.WriteString(line + "\n")
 	}
 	if end < len(entries) {
-		fmt.Fprintf(&output, "  ↓ %d later\n", len(entries)-end)
+		output.WriteString(style.status.render(fmt.Sprintf("  ↓ %d later", len(entries)-end)) + "\n")
 	}
 	return output.String()
 }
 
-func renderCommitDetail(entry ActivityEntry, location *time.Location) string {
+func renderCommitDetail(entry ActivityEntry, location *time.Location, style styles) string {
 	commit := entry.Commit
 	var output strings.Builder
-	fmt.Fprintf(&output, "%s\n\n", displayText(commit.Subject))
-	fmt.Fprintf(&output, "  Commit  %s\n", commit.Hash)
-	fmt.Fprintf(&output, "  Author  %s <%s>\n", displayText(commit.AuthorName), displayText(commit.AuthorEmail))
-	fmt.Fprintf(&output, "  Date    %s\n", commit.AuthoredAt.In(location).Format("Monday, 2 January 2006, 15:04 -07:00"))
+	fmt.Fprintf(&output, "%s\n\n", style.heading.render(displayText(commit.Subject)))
+	fmt.Fprintf(&output, "%s  %s\n", style.label.render("  Commit"), commit.Hash)
+	fmt.Fprintf(&output, "%s  %s <%s>\n", style.label.render("  Author"),
+		displayText(commit.AuthorName), displayText(commit.AuthorEmail))
+	fmt.Fprintf(&output, "%s  %s\n", style.label.render("  Date  "),
+		commit.AuthoredAt.In(location).Format("Monday, 2 January 2006, 15:04 -07:00"))
 	for index, repository := range entry.Repositories {
-		label := "  Repo    "
+		label := style.label.render("  Repo  ")
 		if index > 0 {
-			label = "          "
+			label = style.label.render("        ")
 		}
-		fmt.Fprintf(&output, "%s%s\n", label, displayText(repository))
+		name := displayText(filepath.Base(repository))
+		fmt.Fprintf(&output, "%s  %s\n", label,
+			style.repository(name).render(displayText(repository)))
 	}
-	output.WriteString("\nOnly the subject line is stored; full commit bodies are not read yet.\n")
+	output.WriteString("\n" + style.status.render(
+		"Only the subject line is stored; full commit bodies are not read yet.") + "\n")
 	return output.String()
 }

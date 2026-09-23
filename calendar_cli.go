@@ -93,8 +93,8 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 		fmt.Fprint(out, renderCalendar(activity, calendarOptions{
 			Width:         resolveWidth(out, *width),
 			Today:         time.Now().In(time.Local).Format("2006-01-02"),
-			Highlight:     supportsHighlight(out),
 			EntriesPerDay: *entriesPerDay,
+			Styles:        newStyles(supportsHighlight(out)),
 		}))
 	}
 

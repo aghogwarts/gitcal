@@ -1,14 +1,28 @@
 package main
 
 import (
+	"io"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 var calendarZone = time.FixedZone("test local", 19800)
+
+// Tests run with their output piped, where lipgloss would correctly emit no
+// colour at all. Forcing a profile keeps the styled cases meaningful.
+func init() {
+	renderer := lipgloss.NewRenderer(io.Discard)
+	renderer.SetColorProfile(termenv.TrueColor)
+	renderer.SetHasDarkBackground(true)
+	styleRenderer = renderer
+}
+
+func colourful() styles { return newStyles(true) }
 
 func calendarEntry(t *testing.T, stamp, repository, subject string) ActivityEntry {
 	t.Helper()
@@ -71,7 +85,8 @@ func TestCalendarKeepsEveryRowTheSameDisplayWidth(t *testing.T) {
 	}
 	for _, width := range []int{40, 80, 100, 137, 250} {
 		rendered := renderCalendar(activity, calendarOptions{
-			Width: width, Today: "2026-09-18", Highlight: true, EntriesPerDay: 3,
+			Width: width, Today: "2026-09-18", Selected: "2026-09-02",
+			EntriesPerDay: 3, Styles: colourful(),
 		})
 		rows := gridRows(rendered)
 		if len(rows) == 0 {
@@ -179,19 +194,83 @@ func TestCalendarDropsFieldsAsCellsNarrow(t *testing.T) {
 	}
 }
 
-func TestCalendarHighlightsTodayOnlyWhenAsked(t *testing.T) {
-	activity := Activity{Month: calendarMonth(2026, time.September)}
-	on := renderCalendar(activity, calendarOptions{Width: 100, Today: "2026-09-18", Highlight: true})
-	if !strings.Contains(on, "\x1b[7m 18 \x1b[0m") {
-		t.Fatal("today's date should be highlighted")
+// Disabled styles must produce output a script can read, and every state a
+// date can be in has to look different from the others.
+func TestDateStatesAreVisuallyDistinct(t *testing.T) {
+	activity := Activity{
+		Month: calendarMonth(2026, time.September),
+		Days: []ActivityDay{{Date: "2026-09-08", Entries: []ActivityEntry{
+			calendarEntry(t, "2026-09-08T09:15", "api", "Fix token refresh"),
+		}}},
 	}
-	off := renderCalendar(activity, calendarOptions{Width: 100, Today: "2026-09-18"})
-	if strings.Contains(off, "\x1b") {
-		t.Fatal("no escape codes belong in unhighlighted output")
+	options := calendarOptions{Width: 120, Today: "2026-09-18", Selected: "2026-09-04",
+		EntriesPerDay: 3, Styles: colourful()}
+
+	plain := renderCalendar(activity, calendarOptions{Width: 120, Today: "2026-09-18",
+		Selected: "2026-09-04", EntriesPerDay: 3})
+	if strings.Contains(plain, "\x1b") {
+		t.Fatalf("disabled styles must emit no escape codes:\n%q", plain)
 	}
-	other := renderCalendar(activity, calendarOptions{Width: 100, Today: "2026-10-18", Highlight: true})
-	if strings.Contains(other, "\x1b") {
-		t.Fatal("a date outside the month must not highlight anything")
+
+	rendered := renderCalendar(activity, options)
+	states := map[string]string{
+		"today":       cellFor(t, rendered, "18"),
+		"selected":    cellFor(t, rendered, "4"),
+		"with commit": cellFor(t, rendered, "8"),
+		"weekend":     cellFor(t, rendered, "5"),
+		"quiet":       cellFor(t, rendered, "9"),
+	}
+	for name, cell := range states {
+		if !strings.Contains(cell, "\x1b") {
+			t.Fatalf("%s date carries no styling: %q", name, cell)
+		}
+		for other, against := range states {
+			if name != other && styleOf(cell) == styleOf(against) {
+				t.Fatalf("%s and %s render identically: %q", name, other, styleOf(cell))
+			}
+		}
+	}
+}
+
+// cellFor returns the grid cell whose visible text is exactly the given date.
+func cellFor(t *testing.T, rendered, day string) string {
+	t.Helper()
+	for _, row := range gridRows(rendered) {
+		for _, cell := range strings.Split(row, "│") {
+			if strings.TrimSpace(ansi.Strip(cell)) == day {
+				return cell
+			}
+		}
+	}
+	t.Fatalf("no cell found for date %q", day)
+	return ""
+}
+
+// styleOf keeps the escape codes and drops the text, so two dates can be
+// compared on appearance alone.
+func styleOf(cell string) string {
+	var codes strings.Builder
+	for _, part := range strings.Split(cell, "\x1b")[1:] {
+		if end := strings.IndexByte(part, 'm'); end >= 0 {
+			codes.WriteString(part[:end+1])
+		}
+	}
+	return codes.String()
+}
+
+func TestRepositoryColoursAreStableAndVaried(t *testing.T) {
+	style := colourful()
+	if style.repository("api").render("api") != style.repository("api").render("api") {
+		t.Fatal("a repository's colour must not change between renders")
+	}
+	if style.repository("api").render("x") == style.repository("website").render("x") {
+		t.Fatal("different repositories should not share a colour by default")
+	}
+	if style.repository("API").render("x") != style.repository("api").render("x") {
+		t.Fatal("colour should ignore case so the same repository matches itself")
+	}
+	if plain := newStyles(false); strings.Contains(plain.repository("api").render("api"), "\x1b") {
+		t.Fatal("disabled styles must not colour repository names")
 	}
 }
 
@@ -237,7 +316,7 @@ func TestCalendarControlCharactersNeverReachTheGrid(t *testing.T) {
 			calendarEntry(t, "2026-09-02T09:15", "api", "Subject\x07with\rcontrol"),
 		}}},
 	}
-	rendered := renderCalendar(activity, calendarOptions{Width: 250, EntriesPerDay: 3})
+	rendered := renderCalendar(activity, calendarOptions{Width: 250, EntriesPerDay: 3, Styles: colourful()})
 	if strings.ContainsAny(rendered, "\x07\r") {
 		t.Fatalf("control characters survived into the grid:\n%q", rendered)
 	}

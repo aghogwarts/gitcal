@@ -124,7 +124,75 @@ busy date, reporting how many entries are hidden above and below.
 `--day` is untouched; the interactive list is deliberately terser because detail
 now has a level of its own.
 
-## 7. A dependency conflict, and what it teaches
+## 7. Colour, without conditionals everywhere
+
+Step 4 wrote escape codes by hand: `"\x1b[7m " + number + " \x1b[0m"`. That works
+on a modern terminal and is wrong everywhere else, because it assumes the
+terminal understands those codes.
+
+`lipgloss` was already in the dependency tree as part of Bubble Tea, so using it
+directly added no new modules. It detects the terminal's colour profile —
+truecolor, 256, 16, or none — and degrades automatically.
+
+Colours are **adaptive**: each one declares a value for a light background and
+another for a dark one, and lipgloss picks between them. A single palette then
+stays legible in both without us testing which we are on.
+
+`styles.go` wraps every style in a small type so callers never branch:
+
+```go
+type paint struct {
+	style   lipgloss.Style
+	enabled bool
+}
+
+func (p paint) render(text string) string {
+	if !p.enabled || text == "" {
+		return text
+	}
+	return p.style.Render(text)
+}
+```
+
+Renderers call `style.time.render(...)` unconditionally, and redirected output
+gets plain text because the whole palette was built with `enabled` false.
+
+**Repository colours are derived from the name**, not from position:
+
+```go
+digest := fnv.New32a()
+digest.Write([]byte(strings.ToLower(name)))
+return s.repositories[int(digest.Sum32())%len(s.repositories)]
+```
+
+Hashing rather than counting means `api` keeps the same colour as you move
+between months, as repositories appear and disappear, and regardless of the
+order the scanner happened to find them in.
+
+Two details were easy to get wrong. Shortening a cell can cut a style's closing
+sequence, which would let a colour bleed across the rest of the row, so
+`cellContents` re-appends a reset when it sees an escape without one. And
+`ansi.StringWidth` ignores escape codes entirely, which is why adding colour did
+not disturb a single alignment test — the property we relied on in step 4 is the
+same property that made this change safe.
+
+## 8. Testing colour when the tests have no terminal
+
+`go test` pipes its output, so lipgloss correctly decides the terminal cannot
+show colour and emits none. Colour assertions would then pass while verifying
+nothing.
+
+The palette therefore renders through a package-level `styleRenderer`, which
+follows the real terminal by default and is replaced in tests by one with a
+forced truecolor profile.
+
+The assertions avoid naming specific colours, which would break every time the
+palette is tuned. Instead they strip the text from each cell, keep only the
+escape codes, and require that today, the selection, a weekend, a date with
+commits, and a quiet date all differ from one another. That states the actual
+requirement — these must be distinguishable — rather than restating the palette.
+
+## 9. A dependency conflict, and what it teaches
 
 Adding Bubble Tea broke the build. Its rendering stack expects
 `charmbracelet/x/ansi` v0.10.x, where `Style.Italic()` takes no argument; step 4
@@ -143,7 +211,8 @@ versions is what makes a downgrade like this safe to do quickly.
 
 ## Intentional limits of this increment
 
-No repository or group filtering, no author filtering, and no saved settings —
+The palette is fixed and not configurable. No repository or group filtering,
+no author filtering, and no saved settings —
 those are steps 6 and 7. Every month change still re-reads all history, so a
 large projects folder is slow; caching is step 8. Commit bodies are not read,
 only subjects, so the detail view shows the subject line alone. The grid itself
