@@ -314,7 +314,62 @@ including the ones from step 5, drives the state machine directly and reads
 the result, the same way `calendar_test.go` checks `renderCalendar`'s output
 without a terminal underneath it either.
 
-## 9. What is left
+## 9. A gap the picker exposed: changing the view itself
+
+The picker edits assignments, but it does not change what the calendar is
+*showing*. Trying it revealed the gap directly: `--group personal` only takes
+effect at launch, so seeing `work` instead meant quitting and retyping the
+command. `Tab` closes that, cycling the session through every group without
+restarting.
+
+```go
+func (m calendarModel) groupCycle() []string {
+	cycle := append([]string{""}, m.chosen.config.groupNames()...)
+	return append(cycle, ungrouped)
+}
+
+func (m calendarModel) cycleGroup() (tea.Model, tea.Cmd) {
+	cycle := m.groupCycle()
+	index := 0
+	for i, name := range cycle {
+		if strings.EqualFold(name, m.activeGroup) {
+			index = i
+			break
+		}
+	}
+	m.activeGroup = cycle[(index+1)%len(cycle)]
+	m.chosen.filter = m.chosen.config.filter(m.activeGroup)
+	m.mode, m.activity = viewGrid, Activity{Month: m.month}
+	return m, (&m).beginLoad()
+}
+```
+
+Two things about this were worth getting right rather than obvious by
+accident.
+
+**The cycle is a new field, `activeGroup`, not a rewrite of `chosen.group`.**
+`chosen.group` is what `--group` asked for; overwriting it while cycling would
+make the *next* run start from wherever this session happened to leave off,
+which is not what the flag means. `activeGroup` starts equal to it and moves
+independently, so quitting and rerunning without `--group` always starts from
+"all" again, exactly as before this feature existed.
+
+**The list of groups is rebuilt on every press, not once at startup.** A
+model computed at launch would go stale the moment the repository picker
+creates a new group — pressing Tab would cycle through yesterday's groups
+while today's sits unreachable until a restart. Reading
+`m.chosen.config.groupNames()` fresh each time means a group assigned thirty
+seconds ago in the picker already has a stop on the wheel, which is the same
+"do not make the user restart for something they just did" reasoning that
+motivated the picker in the first place.
+
+`cycleGroup` otherwise reuses `changeMonth`'s exact shape — reset to the grid,
+clear the stale activity, return a `beginLoad` command — because changing which
+group is in view and changing which month is in view have the same
+consequence: the grid on screen no longer matches what should be read, so it
+has to be re-read before it can be trusted again.
+
+## 10. What is left
 
 The picker edits one repository at a time; selecting several and assigning
 them together would still mean the command line. Renaming or moving a

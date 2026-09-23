@@ -381,6 +381,72 @@ func TestEnterDoesNothingWithoutAnyRepositories(t *testing.T) {
 	}
 }
 
+// Tab must not need --group to have named anything: with no groups assigned
+// yet, "all" and "ungrouped" are still two real, distinct stops.
+func TestTabCyclesGroupsStartingFromAll(t *testing.T) {
+	model := newTestModel(t)
+	if model.activeGroup != "" {
+		t.Fatalf("a session launched without --group started on %q", model.activeGroup)
+	}
+
+	next, command := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(calendarModel)
+	if updated.activeGroup != ungrouped || command == nil {
+		t.Fatalf("first Tab gave group %q, command %v; want %s and a reload", updated.activeGroup, command, ungrouped)
+	}
+	if !updated.loading {
+		t.Fatal("cycling the group should reload, the same as changing month")
+	}
+
+	back, _ := updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if got := back.(calendarModel).activeGroup; got != "" {
+		t.Fatalf("a second Tab with nothing else configured landed on %q; want all (empty)", got)
+	}
+}
+
+// A group created moments earlier in the picker must already have a stop on
+// the wheel; nobody should have to restart the program to reach it.
+func TestTabVisitsEveryGroupInUseAndWrapsAround(t *testing.T) {
+	model := newTestModel(t)
+	model.chosen.config.setGroup("/repos/api", "work")
+	model.chosen.config.setGroup("/repos/blog", "personal")
+	model.chosen.filter = model.chosen.config.filter("")
+
+	var seen []string
+	current := model
+	for i := 0; i < 4; i++ {
+		next, _ := current.Update(tea.KeyMsg{Type: tea.KeyTab})
+		current = next.(calendarModel)
+		seen = append(seen, current.activeGroup)
+	}
+	want := []string{"personal", "work", ungrouped, ""}
+	for i, group := range want {
+		if seen[i] != group {
+			t.Fatalf("stop %d was %q; want %q (full sequence: %v)", i, seen[i], group, seen)
+		}
+	}
+}
+
+// --group at startup must still be honoured on the very first frame, and a
+// session that only cycles must leave it alone for the next run.
+func TestCyclingGroupsNeverChangesTheLaunchFlag(t *testing.T) {
+	month := calendarMonth(2026, time.September)
+	chosen := selection{roots: []string{"projects"}, group: "work"}
+	model := newCalendarModel(context.Background(), chosen, month, 3, 120)
+	if model.activeGroup != "work" {
+		t.Fatalf("launching with --group work started the session on %q", model.activeGroup)
+	}
+
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(calendarModel)
+	if updated.activeGroup == "work" {
+		t.Fatal("Tab should have moved the session away from its starting group")
+	}
+	if updated.chosen.group != "work" {
+		t.Fatalf("cycling changed chosen.group to %q; --group must stay as launched", updated.chosen.group)
+	}
+}
+
 func TestRepositoryPickerRendersTheCurrentStateOfEach(t *testing.T) {
 	model := newReposTestModel(t, filepath.FromSlash("/projects/api"), filepath.FromSlash("/projects/vendored"))
 	model.chosen.config.setGroup(filepath.FromSlash("/projects/api"), "work")

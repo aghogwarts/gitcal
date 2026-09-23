@@ -196,8 +196,15 @@ go run . calendar --day 2026-09-18 "path/to/projects"
 | `t`            | Jump to today                                             |
 | `r`            | Re-read the current month, or rescan repositories in the picker |
 | `g`            | Open the repository picker (assign groups, exclude/include) |
+| `Tab`          | Cycle the calendar between all, ungrouped, and each group in use |
 | `?`            | Toggle the key reference                                  |
 | `q`, `Ctrl+C`  | Quit                                                      |
+
+`Tab` changes only this session; it does not rewrite `--group`, so the next
+run starts from whatever you launched with (or nothing, if you launched
+without it). The set of groups it cycles through is read fresh each time you
+press it, so a group you just created in the picker already has a stop on the
+wheel.
 
 ### The repository picker
 
@@ -334,10 +341,7 @@ Exit codes: `0` success/help (including empty results), `1` failure or incomplet
 ## Intentional limits of this increment
 
 A repository belongs to one group, so overlapping categories are not
-expressible. Switching which group `--group` shows still requires restarting
-with a different flag; the picker only edits assignments, and a change to the
-group you launched with does reach the grid immediately because it is the
-same filter, reloaded. There is no caching and no automatic dependency-folder
+expressible. There is no caching and no automatic dependency-folder
 exclusion, so the
 interactive calendar still re-reads every selected repository on each month
 change, and it does not scroll the grid itself. `scan` and `history` still take

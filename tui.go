@@ -60,6 +60,10 @@ type calendarModel struct {
 	help          bool
 	styles        styles
 
+	// activeGroup is the filter actually in effect for this session. It starts
+	// at chosen.group but Tab can move it on, without touching --group itself.
+	activeGroup string
+
 	// The repository picker (viewRepos) edits chosen.config directly and saves
 	// on every change, so a crash mid-edit cannot lose more than one keystroke.
 	repos        []string
@@ -82,7 +86,35 @@ func newCalendarModel(ctx context.Context, chosen selection, month time.Time, en
 		width:         width,
 		height:        24,
 		styles:        newStyles(true),
+		activeGroup:   chosen.group,
 	}
+}
+
+// groupCycle lists every stop Tab visits, in order: everything, then each
+// group in use, then the repositories nobody has assigned yet. It is
+// recomputed on each press, so a group created moments ago in the picker
+// already has a place in the cycle.
+func (m calendarModel) groupCycle() []string {
+	cycle := append([]string{""}, m.chosen.config.groupNames()...)
+	return append(cycle, ungrouped)
+}
+
+// cycleGroup moves the session's active filter on by one stop and reloads,
+// the same way changing month does. --group itself is untouched, so the next
+// run starts back where it was launched, not wherever this session ended.
+func (m calendarModel) cycleGroup() (tea.Model, tea.Cmd) {
+	cycle := m.groupCycle()
+	index := 0
+	for i, name := range cycle {
+		if strings.EqualFold(name, m.activeGroup) {
+			index = i
+			break
+		}
+	}
+	m.activeGroup = cycle[(index+1)%len(cycle)]
+	m.chosen.filter = m.chosen.config.filter(m.activeGroup)
+	m.mode, m.activity = viewGrid, Activity{Month: m.month}
+	return m, (&m).beginLoad()
 }
 
 func startOfMonth(month time.Time) time.Time {
@@ -246,6 +278,8 @@ func (m calendarModel) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode, m.reposIndex = viewRepos, 0
 			return m, (&m).beginReposScan()
 		}
+	case "tab":
+		return m.cycleGroup()
 	}
 
 	switch m.mode {
@@ -441,9 +475,10 @@ func (m calendarModel) View() string {
 		Today:         time.Now().In(m.month.Location()).Format("2006-01-02"),
 		Selected:      m.selected.Format("2006-01-02"),
 		EntriesPerDay: m.entriesPerDay,
-		Group:         m.chosen.group,
+		Group:         m.activeGroup,
 		Styles:        m.styles,
-		Footer:        m.status("←↑↓→ date · [ ] month · enter open · g repos · t today · r refresh · ? help · q quit"),
+		Footer: m.status("←↑↓→ date · [ ] month · enter open · g repos · " +
+			"tab group · t today · r refresh · ? help · q quit"),
 	})
 }
 
@@ -536,6 +571,7 @@ var helpKeys = [][2]string{
 	{"t", "Jump to today"},
 	{"r", "Re-read the current month, or rescan repositories in the picker"},
 	{"g", "Open the repository picker: assign groups, exclude/include"},
+	{"Tab", "Cycle the calendar between all, ungrouped, and each group in use"},
 	{"?", "Close this help"},
 	{"q, Ctrl+C", "Quit"},
 }
