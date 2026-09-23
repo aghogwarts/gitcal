@@ -17,8 +17,9 @@ func runActivity(ctx context.Context, args []string, out, errOut io.Writer) int 
 	monthText := options.String("month", time.Now().Format("2006-01"), "month to show (YYYY-MM), in local time")
 	group := options.String("group", "", "only repositories in this group")
 	mine := options.Bool("mine", false, "only commits authored by one of your configured identities")
+	showTimings := options.Bool("timings", false, "print discovery and history timings to stderr")
 	options.Usage = func() {
-		fmt.Fprintln(options.Output(), "Usage: gitcal activity [--month YYYY-MM] [--group NAME] [--mine] [folder]")
+		fmt.Fprintln(options.Output(), "Usage: gitcal activity [--month YYYY-MM] [--group NAME] [--mine] [--timings] [folder]")
 		fmt.Fprintln(options.Output(), "Place options before the folder; omit the folder to use your configured folders.")
 		options.PrintDefaults()
 	}
@@ -41,7 +42,14 @@ func runActivity(ctx context.Context, args []string, out, errOut io.Writer) int 
 	if !ok {
 		return 1
 	}
-	result, err := collectActivity(ctx, chosen.roots, month, chosen.filter, chosen.authors)
+	var timings *activityTimings
+	if *showTimings {
+		timings = new(activityTimings)
+	}
+	result, err := collectActivityWithTimings(ctx, chosen.roots, month, chosen.filter, chosen.authors, timings)
+	if timings != nil {
+		printActivityTimings(errOut, *timings)
+	}
 	if err != nil {
 		fmt.Fprintf(errOut, "Error: %v\n", err)
 		return 1
@@ -91,4 +99,17 @@ func runActivity(ctx context.Context, args []string, out, errOut io.Writer) int 
 		return 1
 	}
 	return 0
+}
+
+func printActivityTimings(out io.Writer, timings activityTimings) {
+	other := timings.Total - timings.Discovery - timings.History
+	if other < 0 {
+		other = 0
+	}
+	fmt.Fprintf(out, "Timings (activity collection):\n  Discovery: %s\n  Git history: %s\n  Other: %s\n  Total: %s\n",
+		timings.Discovery, timings.History, other, timings.Total)
+	if timings.SlowestRepository != "" {
+		fmt.Fprintf(out, "  Slowest repository read: %s (%s)\n",
+			displayText(timings.SlowestRepository), timings.SlowestRead)
+	}
 }

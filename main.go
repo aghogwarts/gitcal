@@ -14,7 +14,7 @@ import (
 const usage = `Usage:
   gitcal scan <folder>
   gitcal history <repository-folder>
-  gitcal activity [--month YYYY-MM] [--group NAME] [--mine] [folder]
+  gitcal activity [--month YYYY-MM] [--group NAME] [--mine] [--timings] [folder]
   gitcal calendar [--month YYYY-MM] [--day YYYY-MM-DD] [--group NAME] [--mine] [folder]
   gitcal roots [list | add <folder> | remove <folder>]
   gitcal repos [list | set <repository> <group> | exclude <repository> | include <repository>]

@@ -78,6 +78,28 @@ func TestActivityCombinesCompleteMonthAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestActivityTimingsDoNotChangeTheAgenda(t *testing.T) {
+	root := t.TempDir()
+	repo := activityRepo(t, root, "project")
+	historyCommit(t, repo, "Timed commit", "2026-09-03T10:00:00Z", "2026-09-03T10:00:00Z")
+	var ordinaryOut, ordinaryErr bytes.Buffer
+	if code := run(context.Background(), []string{"activity", "--month", "2026-09", root}, &ordinaryOut, &ordinaryErr); code != 0 || ordinaryErr.Len() != 0 {
+		t.Fatalf("ordinary activity failed: exit %d, %s", code, &ordinaryErr)
+	}
+	var timedOut, timedErr bytes.Buffer
+	if code := run(context.Background(), []string{"activity", "--timings", "--month", "2026-09", root}, &timedOut, &timedErr); code != 0 {
+		t.Fatalf("timed activity failed: exit %d, %s", code, &timedErr)
+	}
+	if timedOut.String() != ordinaryOut.String() {
+		t.Fatal("timing changed the agenda printed on stdout")
+	}
+	for _, phase := range []string{"Discovery:", "Git history:", "Other:", "Total:"} {
+		if !strings.Contains(timedErr.String(), phase) {
+			t.Fatalf("missing %q timing on stderr: %s", phase, &timedErr)
+		}
+	}
+}
+
 func TestActivityMonthBoundariesAndStableTies(t *testing.T) {
 	root := t.TempDir()
 	repo := activityRepo(t, root, "boundaries")
@@ -152,6 +174,12 @@ func TestActivityPartialFailuresRemainVisible(t *testing.T) {
 	code := run(context.Background(), []string{"activity", "--month", "2026-09", root}, &out, &errOut)
 	if code != 1 || !strings.Contains(out.String(), "Keep this result") || !strings.Contains(errOut.String(), "Activity incomplete") {
 		t.Fatalf("partial CLI: exit %d, stdout %s, stderr %s", code, &out, &errOut)
+	}
+	out.Reset()
+	errOut.Reset()
+	code = run(context.Background(), []string{"activity", "--timings", "--month", "2026-09", root}, &out, &errOut)
+	if code != 1 || !strings.Contains(out.String(), "Keep this result") || !strings.Contains(errOut.String(), "Timings (activity collection)") || !strings.Contains(errOut.String(), "Activity incomplete") {
+		t.Fatalf("timed partial CLI: exit %d, stdout %s, stderr %s", code, &out, &errOut)
 	}
 }
 

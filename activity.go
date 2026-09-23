@@ -30,11 +30,33 @@ type Activity struct {
 	Warnings               []error
 }
 
+type activityTimings struct {
+	Discovery, History, Total time.Duration
+	SlowestRead               time.Duration
+	SlowestRepository         string
+}
+
 func collectActivity(ctx context.Context, roots []string, month time.Time, filter repositoryFilter, authors authorFilter) (Activity, error) {
+	return collectActivityWithTimings(ctx, roots, month, filter, authors, nil)
+}
+
+func collectActivityWithTimings(ctx context.Context, roots []string, month time.Time, filter repositoryFilter, authors authorFilter, timings *activityTimings) (Activity, error) {
+	if timings != nil {
+		*timings = activityTimings{}
+		started := time.Now()
+		defer func() { timings.Total = time.Since(started) }()
+	}
 	start := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, month.Location())
 	end := start.AddDate(0, 1, 0)
 	result := Activity{Month: start}
+	var scanStarted time.Time
+	if timings != nil {
+		scanStarted = time.Now()
+	}
 	scanned, err := scanAll(ctx, roots)
+	if timings != nil {
+		timings.Discovery = time.Since(scanStarted)
+	}
 	if err != nil {
 		return result, err
 	}
@@ -52,7 +74,18 @@ func collectActivity(ctx context.Context, roots []string, month time.Time, filte
 
 	byHash := make(map[string]*ActivityEntry)
 	for _, repo := range selected {
+		var readStarted time.Time
+		if timings != nil {
+			readStarted = time.Now()
+		}
 		commits, err := readMonthCommits(ctx, repo, start, end)
+		if timings != nil {
+			elapsed := time.Since(readStarted)
+			timings.History += elapsed
+			if elapsed > timings.SlowestRead {
+				timings.SlowestRead, timings.SlowestRepository = elapsed, repo
+			}
+		}
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}

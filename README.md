@@ -125,6 +125,31 @@ The output is a chronological agenda grouped by date. Each entry includes its
 local author time and UTC offset, short hash, subject, author, and full repository
 path(s). The final line gives unique-commit, active-day, and repository counts.
 
+### Measure a month on your machine
+
+`activity --timings` uses the same repository scan and history reader as the
+calendar. Build once, then measure without including Go compilation time:
+
+```powershell
+# Windows PowerShell; omit --month to measure the current month.
+go build -o gitcal.exe .
+.\gitcal.exe activity --timings --month 2026-09 | Out-Null
+```
+
+```sh
+# macOS
+go build -o gitcal .
+./gitcal activity --timings --month 2026-09 >/dev/null
+```
+
+Timings appear on stderr; `Out-Null` and `/dev/null` only hide the long agenda
+on stdout. **Discovery** includes finding and validating repositories;
+**Git history** covers opening and streaming their logs; **Other** includes
+filtering and grouping; **Total** measures activity collection, not formatting
+or process startup. The slowest repository read is listed too. Pass the same
+`--group` or `--mine` filters you normally use. Each activity run reads fresh
+data, so it measures a first visit rather than the interactive cache.
+
 - The selected month uses **author timestamps in the machine's local timezone**.
   The first instant of the month is included; the first instant of the next month
   is excluded. UTC offsets and daylight-saving changes are respected.
