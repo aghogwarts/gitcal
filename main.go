@@ -15,6 +15,7 @@ const usage = `Usage:
   gitcal scan <folder>
   gitcal history <repository-folder>
   gitcal activity [--month YYYY-MM] <folder>
+  gitcal calendar [--month YYYY-MM] [--day YYYY-MM-DD] <folder>
   gitcal help
 
 Scan a folder and its subfolders for Git working repositories.
@@ -22,9 +23,11 @@ History shows up to 20 commits reachable from HEAD, including all authors
 and merge commits. Author timestamps are displayed in your local timezone.
 Activity groups that month's commits across discovered repositories by local
 author date, counting identical hashes once. Default: current month.
-Place activity options before the folder. Activity reads full histories;
-large repositories can take time. All authors and merges are included.
-Quote paths containing spaces. Use Ctrl+C to cancel.
+Calendar shows the same month as a grid of weeks starting on Monday, with a
+few commits inside each date and "+N more" for the rest; --day lists one
+date in full. Place options before the folder. These commands read full
+histories; large repositories can take time. All authors and merges are
+included. Quote paths containing spaces. Use Ctrl+C to cancel.
 `
 
 func main() {
@@ -42,6 +45,9 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	if args[0] == "activity" {
 		return runActivity(ctx, args[1:], out, errOut)
+	}
+	if args[0] == "calendar" {
+		return runCalendar(ctx, args[1:], out, errOut)
 	}
 	if len(args) != 2 || (args[0] != "scan" && args[0] != "history") {
 		fmt.Fprint(errOut, usage)

@@ -1,20 +1,20 @@
-# gitcal — step 3: monthly activity across repositories
+# gitcal — step 4: the static month grid
 
 A learning project for a local Git calendar, written in Go.
 
 The planned interface is a traditional monthly calendar with commits as events
 inside each day, optional repository groups, and filters. **This version discovers
-repositories, reads recent history, and combines one month's commits across
-repositories into a daily agenda.** It does not display the calendar grid or
-save settings yet.
+repositories, reads recent history, combines one month's commits across
+repositories, and draws them as a month grid.** The grid is printed once: there
+is no keyboard navigation, and settings are not saved yet.
 `gitcal` is a working name, not a checked or reserved public project name.
 
 ## Requirements
 
-- Install a currently supported Go release from https://go.dev/dl/.
+- Install Go 1.26 or newer from https://go.dev/dl/.
 - Install Git and ensure `git --version` works in your terminal.
-- The module uses Go 1.22 language features or earlier; use a supported newer
-  toolchain rather than installing an old release just to match `go.mod`.
+- Step 4 added two dependencies whose current releases require Go 1.26; `go.mod`
+  therefore declares that floor. `go run` and `go build` download them on first use.
 
 ## Run
 
@@ -138,13 +138,57 @@ path(s). The final line gives unique-commit, active-day, and repository counts.
 - Empty repositories are valid. With no matching activity, an explicit message
   appears. A failed repository produces a warning while successful results remain
   visible, with exit code 1 and an incomplete-results message.
-- This is the data preparation step for the planned traditional calendar, with
-  commits as events in date cells. It currently prints only days with activity.
+- This is the data preparation step for the calendar grid below. It prints only
+  days with activity; `calendar` renders every date in the month.
 
 **Performance:** this learning increment reads a repository's entire reachable
 history into memory before filtering, one repository at a time. Large histories
 and broad scan roots can be slow. Start with a small projects folder. Streaming,
 caching, progress reporting, and saved repository selections are future work.
+
+## Draw the month as a calendar
+
+`calendar` reads the same data as `activity` and lays it out as a month grid.
+Pass the same parent folder, with options before it.
+
+```powershell
+# Windows PowerShell
+go run . calendar --month 2026-09 "C:\path\to\projects"
+```
+
+```sh
+# macOS
+go run . calendar --month 2026-09 "$HOME/projects"
+```
+
+Omit `--month` for the current local month. To read one date completely,
+including commits the grid had to summarise:
+
+```sh
+go run . calendar --day 2026-09-18 "path/to/projects"
+```
+
+`go run . calendar --help` lists the options.
+
+| Option      | Effect                                                            |
+| ----------- | ----------------------------------------------------------------- |
+| `--month`   | Month to draw, `YYYY-MM`; defaults to the current local month      |
+| `--day`     | List one date's commits in full instead of drawing the grid        |
+| `--per-day` | Commits shown in each date cell before `+N more`; default 3        |
+| `--width`   | Grid width in columns; `0` (default) detects the terminal          |
+
+- Weeks start on **Monday**. A configurable Sunday start is future work.
+- The grid sizes itself to the terminal, clamped between 78 and 204 columns.
+  Redirecting output to a file or pipe uses 80 columns.
+- Cells carry the commit subject, adding the repository name and then the time
+  as the terminal grows. Text is shortened by **display width**, so emoji and
+  East Asian characters stay aligned.
+- Today's date is highlighted when output is a terminal and `NO_COLOR` is unset.
+- `--day` and `--month` cannot be combined: a date already identifies its month.
+- The summary below the grid counts every commit in the month, not the visible
+  ones. Use `--day` or raise `--per-day` to see the rest.
+- Month selection, timezone handling, deduplication, author inclusion, and
+  warning behavior are identical to `activity`.
 
 ## Scanner behavior
 
@@ -168,12 +212,13 @@ Exit codes: `0` success/help (including empty results), `1` failure or incomplet
 ## Intentional limits of this increment
 
 One scan root or history repository per invocation; no remembered roots, groups,
-calendar grid, caching, progress indicator, or automatic dependency-folder exclusions.
-Large directory trees may take time to scan. Bare repositories are not discovered
-because this increment looks for working checkouts with a `.git` marker. Separate
-worktrees appear separately in `scan`, while `activity` deduplicates their commits.
-The user verified the first scanner on their machine (OS not recorded). Native
-execution of the newer history and activity commands still needs Windows/macOS verification.
+caching, progress indicator, or automatic dependency-folder exclusions. The
+calendar is drawn once and exits: no keyboard navigation, date selection, or
+month paging. Large directory trees may take time to scan. Bare repositories are
+not discovered because this increment looks for working checkouts with a `.git`
+marker. Separate worktrees appear separately in `scan`, while `activity` and
+`calendar` deduplicate their commits. The `scan`, `activity`, and `calendar`
+commands have been run natively on Windows; macOS still needs verification.
 
 ## Verification for this increment
 
@@ -183,7 +228,8 @@ See `VERIFICATION.md` for the checks performed on this increment and their limit
 
 Read [WALKTHROUGH.md](WALKTHROUGH.md) for discovery,
 [STEP-2-WALKTHROUGH.md](STEP-2-WALKTHROUGH.md) for single-repository history,
-and [STEP-3-WALKTHROUGH.md](STEP-3-WALKTHROUGH.md) for monthly activity.
+[STEP-3-WALKTHROUGH.md](STEP-3-WALKTHROUGH.md) for monthly activity, and
+[STEP-4-WALKTHROUGH.md](STEP-4-WALKTHROUGH.md) for the month grid.
 
 | File               | Purpose                                                         |
 | ------------------ | --------------------------------------------------------------- |
@@ -193,11 +239,16 @@ and [STEP-3-WALKTHROUGH.md](STEP-3-WALKTHROUGH.md) for monthly activity.
 | `history.go`       | Commit data, HEAD resolution, history retrieval and parsing     |
 | `activity.go`      | Month filtering, deduplication, provenance and date grouping    |
 | `activity_cli.go`  | Activity flags and agenda output                                |
+| `calendar.go`      | Month arithmetic and grid layout, with no terminal access       |
+| `calendar_cli.go`  | Calendar flags, terminal width detection and the day view       |
 | `scan_test.go`     | Original discovery tests                                        |
 | `history_test.go`  | Real-repository integration tests and parser checks             |
 | `activity_test.go` | Multiple repositories, date boundaries, duplicates and failures |
+| `calendar_test.go` | Layout alignment, week placement, overflow and highlighting     |
 
-There are no third-party Go dependencies. All three commands remain available.
+Two third-party dependencies arrived with step 4: `golang.org/x/term` for
+terminal size, and `github.com/charmbracelet/x/ansi` for display-width
+truncation. All four commands remain available.
 
 The module name is deliberately local for now. When a GitHub repository is chosen,
 we can change it to that repository's import path. Publishing and a license choice
