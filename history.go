@@ -25,6 +25,12 @@ type Commit struct {
 }
 
 func readHistory(ctx context.Context, folder string) ([]Commit, error) {
+	return readCommits(ctx, folder, historyLimit)
+}
+
+// A zero limit reads the full reachable history. Month activity needs this:
+// taking only 20 commits could omit matching commits earlier in the month.
+func readCommits(ctx context.Context, folder string, limit int) ([]Commit, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -53,10 +59,14 @@ func readHistory(ctx context.Context, folder string) ([]Commit, error) {
 	}
 	// NUL separates fields; -z also terminates each record with NUL. Ordinary
 	// spaces, punctuation, and Unicode in author names and subjects stay intact.
-	output, err := runGit(ctx, gitPath, repo, marker,
-		"log", "--max-count="+strconv.Itoa(historyLimit), "--no-color",
+	args := []string{"log", "--no-color",
 		"--no-decorate", "--no-show-signature", "--no-notes", "--no-patch",
-		"--encoding=UTF-8", "-z", "--format=%H%x00%an%x00%ae%x00%aI%x00%s", head, "--")
+		"--encoding=UTF-8", "-z", "--format=%H%x00%an%x00%ae%x00%aI%x00%s"}
+	if limit > 0 {
+		args = append(args, "--max-count="+strconv.Itoa(limit))
+	}
+	args = append(args, head, "--")
+	output, err := runGit(ctx, gitPath, repo, marker, args...)
 	if err != nil {
 		return nil, err
 	}

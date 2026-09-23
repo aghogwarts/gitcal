@@ -14,11 +14,16 @@ import (
 const usage = `Usage:
   gitcal scan <folder>
   gitcal history <repository-folder>
+  gitcal activity [--month YYYY-MM] <folder>
   gitcal help
 
 Scan a folder and its subfolders for Git working repositories.
 History shows up to 20 commits reachable from HEAD, including all authors
 and merge commits. Author timestamps are displayed in your local timezone.
+Activity groups that month's commits across discovered repositories by local
+author date, counting identical hashes once. Default: current month.
+Place activity options before the folder. Activity reads full histories;
+large repositories can take time. All authors and merges are included.
 Quote paths containing spaces. Use Ctrl+C to cancel.
 `
 
@@ -34,6 +39,9 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h")) {
 		fmt.Fprint(out, usage)
 		return 0
+	}
+	if args[0] == "activity" {
+		return runActivity(ctx, args[1:], out, errOut)
 	}
 	if len(args) != 2 || (args[0] != "scan" && args[0] != "history") {
 		fmt.Fprint(errOut, usage)

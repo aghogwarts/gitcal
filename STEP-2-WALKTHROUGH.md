@@ -1,5 +1,10 @@
 # Step 2: turning Git history into Go data
 
+Step 3 retains this command and its 20-commit limit. Its retrieval implementation
+now lives in `readCommits`, which accepts a limit; `readHistory` calls it with 20.
+The new monthly activity command calls it with zero to read all reachable commits.
+See `STEP-3-WALKTHROUGH.md` for that next increment.
+
 We now have two commands: `scan` discovers repositories; `history` reads commits
 from one repository you choose. Keeping this increment to one repository lets us
 learn data retrieval and parsing before combining repositories or building the UI.

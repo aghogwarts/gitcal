@@ -1,11 +1,12 @@
-# gitcal — step 2: reading commit history
+# gitcal — step 3: monthly activity across repositories
 
 A learning project for a local Git calendar, written in Go.
 
 The planned interface is a traditional monthly calendar with commits as events
 inside each day, optional repository groups, and filters. **This version discovers
-repositories and reads the latest 20 commits from one repository.** It does not
-display a calendar or save settings yet.
+repositories, reads recent history, and combines one month's commits across
+repositories into a daily agenda.** It does not display the calendar grid or
+save settings yet.
 `gitcal` is a working name, not a checked or reserved public project name.
 
 ## Requirements
@@ -92,6 +93,59 @@ characters of the commit hash, the subject, and the author's name and email.
 To compare with Git, run `git -C "your-repository-path" log -20`. It should select
 the same commits, although formatting and displayed timezone can differ.
 
+## Combine activity across repositories
+
+Pass the parent folder you previously scanned. Options go **before** the folder.
+
+```powershell
+# Windows PowerShell
+go run . activity --month 2026-09 "C:\path\to\projects"
+```
+
+```sh
+# macOS
+go run . activity --month 2026-09 "$HOME/projects"
+```
+
+Omit `--month` for the current local month:
+
+```sh
+go run . activity "path/to/projects"
+```
+
+`go run . activity --help` shows the activity options. Month values must be
+`YYYY-MM`, including the leading zero for months 01–09. A repository root itself
+also works as the scan folder, and nested repositories are included.
+
+The output is a chronological agenda grouped by date. Each entry includes its
+local author time and UTC offset, short hash, subject, author, and full repository
+path(s). The final line gives unique-commit, active-day, and repository counts.
+
+- The selected month uses **author timestamps in the machine's local timezone**.
+  The first instant of the month is included; the first instant of the next month
+  is excluded. UTC offsets and daylight-saving changes are respected.
+- Activity reads the full history reachable from each checkout's HEAD, with no
+  20-commit cap. The existing `history` command still shows only its 20-commit
+  preview. Only history available locally is readable (for example, shallow clones
+  contain less history); the tool does not fetch missing objects.
+- All authors and merges remain included. Unmerged branches are not included
+  unless they are the current checkout of a discovered repository/worktree.
+- Identical full commit hashes are counted once across repositories. Every source
+  repository is retained and shown, so clones and worktrees do not lose provenance.
+  Similar messages, rebases, and cherry-picks with different hashes remain distinct.
+- Days and commits are sorted chronologically by local author date/time. Equal
+  instants use the full hash as a stable tie-breaker; repository paths are sorted.
+- Empty repositories are valid. With no matching activity, an explicit message
+  appears. A failed repository produces a warning while successful results remain
+  visible, with exit code 1 and an incomplete-results message.
+- This is the data preparation step for the planned traditional calendar, with
+  commits as events in date cells. It currently prints only days with activity.
+
+**Performance:** this learning increment reads a repository's entire reachable
+history into memory before filtering, one repository at a time. Large histories
+and broad scan roots can be slow. Start with a small projects folder. Streaming,
+caching, progress reporting, and saved repository selections are future work.
+
 ## Scanner behavior
 
 - Lists absolute repository paths, sorted for repeatable output.
@@ -108,18 +162,18 @@ the same commits, although formatting and displayed timezone can differ.
 - Ctrl+C cancels the scan, including any running Git validation command.
 - Makes no repository changes and performs no network requests.
 
-Exit codes: `0` successful scan/help, `1` failure or incomplete scan,
+Exit codes: `0` success/help (including empty results), `1` failure or incomplete results,
 `2` invalid command usage.
 
 ## Intentional limits of this increment
 
 One scan root or history repository per invocation; no remembered roots, groups,
-calendar, caching, progress indicator, or automatic dependency-folder exclusions.
+calendar grid, caching, progress indicator, or automatic dependency-folder exclusions.
 Large directory trees may take time to scan. Bare repositories are not discovered
 because this increment looks for working checkouts with a `.git` marker. Separate
-worktrees appear separately; commit deduplication belongs to the history stage.
+worktrees appear separately in `scan`, while `activity` deduplicates their commits.
 The user verified the first scanner on their machine (OS not recorded). Native
-execution of this history increment still needs Windows/macOS verification.
+execution of the newer history and activity commands still needs Windows/macOS verification.
 
 ## Verification for this increment
 
@@ -127,19 +181,23 @@ See `VERIFICATION.md` for the checks performed on this increment and their limit
 
 ## Learn the code
 
-Read [WALKTHROUGH.md](WALKTHROUGH.md) for discovery and
-[STEP-2-WALKTHROUGH.md](STEP-2-WALKTHROUGH.md) for the new history command.
+Read [WALKTHROUGH.md](WALKTHROUGH.md) for discovery,
+[STEP-2-WALKTHROUGH.md](STEP-2-WALKTHROUGH.md) for single-repository history,
+and [STEP-3-WALKTHROUGH.md](STEP-3-WALKTHROUGH.md) for monthly activity.
 
-| File              | Purpose                                                     |
-| ----------------- | ----------------------------------------------------------- |
-| `main.go`         | Command routing and human-readable output                   |
-| `scan.go`         | Existing repository discovery                               |
-| `git.go`          | Shared read-only Git process execution                      |
-| `history.go`      | Commit data, HEAD resolution, history retrieval and parsing |
-| `scan_test.go`    | Original discovery tests                                    |
-| `history_test.go` | Real-repository integration tests and parser checks         |
+| File               | Purpose                                                         |
+| ------------------ | --------------------------------------------------------------- |
+| `main.go`          | Command routing and human-readable output                       |
+| `scan.go`          | Existing repository discovery                                   |
+| `git.go`           | Shared read-only Git process execution                          |
+| `history.go`       | Commit data, HEAD resolution, history retrieval and parsing     |
+| `activity.go`      | Month filtering, deduplication, provenance and date grouping    |
+| `activity_cli.go`  | Activity flags and agenda output                                |
+| `scan_test.go`     | Original discovery tests                                        |
+| `history_test.go`  | Real-repository integration tests and parser checks             |
+| `activity_test.go` | Multiple repositories, date boundaries, duplicates and failures |
 
-There are no third-party Go dependencies. Both commands remain available.
+There are no third-party Go dependencies. All three commands remain available.
 
 The module name is deliberately local for now. When a GitHub repository is chosen,
 we can change it to that repository's import path. Publishing and a license choice
