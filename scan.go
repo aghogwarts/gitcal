@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 // scanResult separates useful results from recoverable failures.
@@ -81,19 +80,9 @@ func scan(ctx context.Context, root string) (scanResult, error) {
 }
 
 func validateRepository(ctx context.Context, gitPath, repo, marker string) error {
-	// Separate arguments preserve spaces and avoid invoking a shell.
-	cmd := exec.CommandContext(ctx, gitPath, "--git-dir", marker, "--work-tree", repo, "rev-parse", "--git-dir")
-	cmd.Dir = repo
-	// A calling shell's Git overrides must not redirect this repository check.
-	cmd.Env = []string{}
-	for _, variable := range os.Environ() {
-		if !strings.HasPrefix(strings.ToUpper(variable), "GIT_") {
-			cmd.Env = append(cmd.Env, variable)
-		}
-	}
-	output, err := cmd.CombinedOutput()
+	_, err := runGit(ctx, gitPath, repo, marker, "rev-parse", "--git-dir")
 	if err != nil {
-		return fmt.Errorf("Git could not validate repository: %w (%s)", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("Git could not validate repository: %w", err)
 	}
 	return nil
 }

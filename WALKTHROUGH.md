@@ -1,5 +1,9 @@
 # Step 1 walkthrough: finding repositories
 
+This explains the original discovery increment. Step 2 adds a `history` command
+and moves the shared Git process setup into `git.go`; see `STEP-2-WALKTHROUGH.md`.
+The scanner's traversal behavior is unchanged.
+
 The purpose of this increment is to answer one question: **which Git working
 repositories exist beneath a folder?** Everything the calendar does later depends
 on that answer. Keeping discovery separate lets us understand and verify it first.
