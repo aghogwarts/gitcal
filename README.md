@@ -1,13 +1,14 @@
-# gitcal — step 6a: remembered folders and repository groups
+# gitcal — step 6: remembered folders and repository groups
 
 A learning project for a local Git calendar, written in Go.
 
 The planned interface is a traditional monthly calendar with commits as events
 inside each day, optional repository groups, and filters. **This version discovers
 repositories, reads their history, presents one month at a time as a calendar you
-can move around with the keyboard, and remembers which folders to scan and which
-group each repository belongs to.** Choosing repositories from inside the
-interactive calendar, author filtering, and caching are not implemented yet.
+can move around with the keyboard, remembers which folders to scan, and lets you
+assign each repository's group or exclude it either from the command line or from
+inside the interactive calendar itself.** Author filtering and caching are not
+implemented yet.
 `gitcal` is a working name, not a checked or reserved public project name.
 
 ## Requirements
@@ -193,9 +194,24 @@ go run . calendar --day 2026-09-18 "path/to/projects"
 | `Enter`        | Open the selected date, then the selected commit          |
 | `Esc`          | Back up one level                                         |
 | `t`            | Jump to today                                             |
-| `r`            | Re-read the current month                                 |
+| `r`            | Re-read the current month, or rescan repositories in the picker |
+| `g`            | Open the repository picker (assign groups, exclude/include) |
 | `?`            | Toggle the key reference                                  |
 | `q`, `Ctrl+C`  | Quit                                                      |
+
+### The repository picker
+
+Press `g` from the grid to list every discovered repository without leaving
+the calendar. `↑`/`↓` selects one, `Enter` opens a small text field to type its
+group — leave it blank and press `Enter` to clear the group — and `e` toggles
+whether it is excluded. `Esc` returns to the grid, reloading it automatically
+if anything changed. While typing, every key including `q` and `?` is treated
+as text; only `Ctrl+C` still quits.
+
+Changes save immediately, one keystroke at a time, to the same configuration
+file `repos set` and `repos exclude` write. Either interface can be used
+interchangeably; the picker is for a quick change mid-browse, and the command
+line is for scripting or editing several repositories at once.
 
 - Every month change re-reads all history, so a large projects folder takes a
   moment. The footer reports progress, and superseded scans are cancelled.
@@ -317,18 +333,20 @@ Exit codes: `0` success/help (including empty results), `1` failure or incomplet
 
 ## Intentional limits of this increment
 
-Repositories are grouped and excluded from the command line only; choosing them
-from inside the interactive calendar is the next step. A repository belongs to
-one group, so overlapping categories are not expressible. There is no caching
-and no automatic dependency-folder exclusion, so the interactive calendar still
-re-reads every selected repository on each month change, and it does not scroll
-the grid itself. `scan` and `history` still take exactly one folder. Large
-directory trees may take time to scan. Bare repositories are not discovered
-because this increment looks for working checkouts with a `.git` marker.
-Separate worktrees appear separately in `scan`, while `activity` and `calendar`
-deduplicate their commits. Moving or renaming a repository on disk leaves its
-saved group behind, pointing at the old path. All commands have been run
-natively on Windows; macOS still needs verification.
+A repository belongs to one group, so overlapping categories are not
+expressible. Switching which group `--group` shows still requires restarting
+with a different flag; the picker only edits assignments, and a change to the
+group you launched with does reach the grid immediately because it is the
+same filter, reloaded. There is no caching and no automatic dependency-folder
+exclusion, so the
+interactive calendar still re-reads every selected repository on each month
+change, and it does not scroll the grid itself. `scan` and `history` still take
+exactly one folder. Large directory trees may take time to scan. Bare
+repositories are not discovered because this increment looks for working
+checkouts with a `.git` marker. Separate worktrees appear separately in `scan`,
+while `activity` and `calendar` deduplicate their commits. Moving or renaming a
+repository on disk leaves its saved group behind, pointing at the old path. All
+commands have been run natively on Windows; macOS still needs verification.
 
 ## Verification for this increment
 
@@ -343,7 +361,8 @@ The walkthroughs live in [docs/](docs). Read
 [STEP-3-WALKTHROUGH.md](docs/STEP-3-WALKTHROUGH.md) for monthly activity,
 [STEP-4-WALKTHROUGH.md](docs/STEP-4-WALKTHROUGH.md) for the month grid,
 [STEP-5-WALKTHROUGH.md](docs/STEP-5-WALKTHROUGH.md) for the interactive interface,
-and [STEP-6-WALKTHROUGH.md](docs/STEP-6-WALKTHROUGH.md) for saved settings.
+[STEP-6-WALKTHROUGH.md](docs/STEP-6-WALKTHROUGH.md) for saved settings, and
+[STEP-6B-WALKTHROUGH.md](docs/STEP-6B-WALKTHROUGH.md) for the repository picker.
 
 | File               | Purpose                                                         |
 | ------------------ | --------------------------------------------------------------- |

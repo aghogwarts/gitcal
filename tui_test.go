@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,20 @@ func newTestModel(t *testing.T, entries ...ActivityEntry) calendarModel {
 	} else {
 		model.activity = Activity{Month: month}
 	}
+	return model
+}
+
+// newReposTestModel starts already inside the picker with a fixed repository
+// list, so key-handling tests do not need a real scan to run first.
+func newReposTestModel(t *testing.T, repositories ...string) calendarModel {
+	t.Helper()
+	path := tempConfig(t)
+	month := calendarMonth(2026, time.September)
+	chosen := selection{roots: []string{"projects"}, path: path}
+	model := newCalendarModel(context.Background(), chosen, month, 3, 120)
+	model.request = 1
+	model.mode = viewRepos
+	model.repos = repositories
 	return model
 }
 
@@ -211,5 +226,172 @@ func TestDayListScrollsToKeepTheSelectionVisible(t *testing.T) {
 	}
 	if empty := renderDayList(activity, "2026-09-02", 0, 100, 10, newStyles(false)); !strings.Contains(empty, "No commits") {
 		t.Fatal("an empty date should say so")
+	}
+}
+
+// g must both switch views and start a scan; without the scan the picker
+// would show nothing until r was pressed by hand.
+func TestPressingGOpensTheRepositoryPickerAndScans(t *testing.T) {
+	next, command := newTestModel(t).Update(keyRune("g"))
+	updated := next.(calendarModel)
+	if updated.mode != viewRepos || !updated.reposLoading || command == nil {
+		t.Fatalf("g gave mode %v, loading %v, command %v", updated.mode, updated.reposLoading, command)
+	}
+}
+
+func TestReposLoadedMessagePopulatesTheList(t *testing.T) {
+	model := newReposTestModel(t)
+	model.reposLoading, model.reposIndex = true, 5
+
+	next, _ := model.Update(reposLoadedMsg{repositories: []string{"/projects/api", "/projects/blog"}})
+	updated := next.(calendarModel)
+	if updated.reposLoading || len(updated.repos) != 2 {
+		t.Fatalf("loading %v, repos %v", updated.reposLoading, updated.repos)
+	}
+	// An index left over from a longer, previous list must not go out of range.
+	if updated.reposIndex != 0 {
+		t.Fatalf("out-of-range index was not reset, got %d", updated.reposIndex)
+	}
+}
+
+// The point of typing a name is that it works before any group exists
+// anywhere, which cycling through known names could not do.
+func TestTypingAGroupNameSavesItImmediately(t *testing.T) {
+	repository := filepath.FromSlash("/projects/api")
+	model := newReposTestModel(t, repository)
+
+	editing := press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+	if !editing.editingGroup {
+		t.Fatal("enter should start editing the selected repository's group")
+	}
+	for _, r := range "work" {
+		editing = press(t, editing, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	saved := press(t, editing, tea.KeyMsg{Type: tea.KeyEnter})
+	if saved.editingGroup {
+		t.Fatal("enter should close the text field")
+	}
+	if !saved.reposChanged {
+		t.Fatal("saving a group should mark the picker as changed")
+	}
+	if got := saved.chosen.filter.groupOf(repository); got != "work" {
+		t.Fatalf("group was %q; want work", got)
+	}
+	if saved.reposSaveErr != nil {
+		t.Fatalf("save reported an error: %v", saved.reposSaveErr)
+	}
+
+	reloaded, err := loadConfig(saved.chosen.path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := reloaded.filter("").groupOf(repository); got != "work" {
+		t.Fatalf("group on disk was %q; want work", got)
+	}
+}
+
+// Every character while editing belongs to the text field, even the ones
+// that quit or open help everywhere else in the program.
+func TestReservedKeysAreOrdinaryCharactersWhileEditing(t *testing.T) {
+	model := newReposTestModel(t, "/projects/api")
+	editing := press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+
+	_, command := editing.Update(keyRune("q"))
+	if command != nil {
+		t.Fatal("q should not quit while a group name is being typed")
+	}
+	typed := press(t, editing, keyRune("q"))
+	if typed.groupInput != "q" || !typed.editingGroup {
+		t.Fatalf("q was not treated as text: input %q, editing %v", typed.groupInput, typed.editingGroup)
+	}
+
+	backspaced := press(t, press(t, typed, keyRune("!")), tea.KeyMsg{Type: tea.KeyBackspace})
+	if backspaced.groupInput != "q" {
+		t.Fatalf("backspace left %q; want q", backspaced.groupInput)
+	}
+}
+
+func TestEscapeCancelsEditingWithoutSaving(t *testing.T) {
+	repository := filepath.FromSlash("/projects/api")
+	model := newReposTestModel(t, repository)
+	editing := press(t, model, tea.KeyMsg{Type: tea.KeyEnter})
+	typed := press(t, editing, keyRune("x"))
+
+	cancelled := press(t, typed, tea.KeyMsg{Type: tea.KeyEsc})
+	if cancelled.editingGroup {
+		t.Fatal("esc should close the text field")
+	}
+	if cancelled.reposChanged {
+		t.Fatal("cancelling must not count as a change")
+	}
+	if got := cancelled.chosen.filter.groupOf(repository); got != ungrouped {
+		t.Fatalf("group became %q without ever saving", got)
+	}
+}
+
+func TestExcludeTogglesBackAndForthAndPersists(t *testing.T) {
+	repository := filepath.FromSlash("/projects/vendored")
+	model := newReposTestModel(t, repository)
+
+	excluded := press(t, model, keyRune("e"))
+	if excluded.chosen.filter.includes(repository) {
+		t.Fatal("e should have excluded the selected repository")
+	}
+	reloaded, err := loadConfig(excluded.chosen.path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if reloaded.filter("").includes(repository) {
+		t.Fatal("the exclusion was not saved")
+	}
+
+	included := press(t, excluded, keyRune("e"))
+	if !included.chosen.filter.includes(repository) {
+		t.Fatal("pressing e again should include it back")
+	}
+}
+
+// Leaving the picker must reload the grid when something changed, and must
+// not waste a scan when nothing did.
+func TestLeavingTheRepositoryPickerReloadsOnlyIfSomethingChanged(t *testing.T) {
+	unchanged := newReposTestModel(t, "/projects/api")
+	_, command := unchanged.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if command != nil {
+		t.Fatal("esc without any edits should not start a reload")
+	}
+
+	changed := press(t, newReposTestModel(t, "/projects/api"), keyRune("e"))
+	if !changed.reposChanged {
+		t.Fatal("excluding a repository should mark the picker as changed")
+	}
+	next, command := changed.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(calendarModel)
+	if updated.mode != viewGrid || command == nil {
+		t.Fatalf("esc after an edit gave mode %v, command %v", updated.mode, command)
+	}
+	if updated.reposChanged {
+		t.Fatal("the changed flag should reset once the reload has been started")
+	}
+}
+
+func TestEnterDoesNothingWithoutAnyRepositories(t *testing.T) {
+	model := newReposTestModel(t)
+	if opened := press(t, model, tea.KeyMsg{Type: tea.KeyEnter}); opened.editingGroup {
+		t.Fatal("there is nothing to edit when no repository was found")
+	}
+}
+
+func TestRepositoryPickerRendersTheCurrentStateOfEach(t *testing.T) {
+	model := newReposTestModel(t, filepath.FromSlash("/projects/api"), filepath.FromSlash("/projects/vendored"))
+	model.chosen.config.setGroup(filepath.FromSlash("/projects/api"), "work")
+	model.chosen.config.exclude(filepath.FromSlash("/projects/vendored"))
+	model.chosen.filter = model.chosen.config.filter("")
+
+	view := model.View()
+	if !strings.Contains(view, "work") {
+		t.Fatalf("the assigned group is not shown:\n%s", view)
+	}
+	if !strings.Contains(view, "excluded") {
+		t.Fatalf("the exclusion is not shown:\n%s", view)
 	}
 }

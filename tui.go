@@ -3,19 +3,22 @@ package main
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// The three levels the plan calls for: the month, one date, one commit.
+// The plan's three levels, plus the repository picker that edits groups and
+// exclusions without leaving the interface.
 type viewMode int
 
 const (
 	viewGrid viewMode = iota
 	viewDay
 	viewCommit
+	viewRepos
 )
 
 // reloadMsg asks the model to start a scan. Init cannot change the model, so
@@ -28,6 +31,13 @@ type activityLoadedMsg struct {
 	request  int
 	activity Activity
 	err      error
+}
+
+// reposLoadedMsg carries every discovered repository, not only the ones the
+// active filter selects, so an excluded repository stays reachable to edit.
+type reposLoadedMsg struct {
+	repositories []string
+	err          error
 }
 
 type calendarModel struct {
@@ -49,6 +59,17 @@ type calendarModel struct {
 	width, height int
 	help          bool
 	styles        styles
+
+	// The repository picker (viewRepos) edits chosen.config directly and saves
+	// on every change, so a crash mid-edit cannot lose more than one keystroke.
+	repos        []string
+	reposIndex   int
+	reposLoading bool
+	reposErr     error
+	reposSaveErr error
+	reposChanged bool
+	editingGroup bool
+	groupInput   string
 }
 
 func newCalendarModel(ctx context.Context, chosen selection, month time.Time, entriesPerDay, width int) calendarModel {
@@ -95,6 +116,71 @@ func (m *calendarModel) beginLoad() tea.Cmd {
 	}
 }
 
+// beginReposScan lists every discovered repository under the configured
+// folders. It shares the cancel-the-predecessor pattern with beginLoad, since
+// only one background scan is ever useful at a time.
+func (m *calendarModel) beginReposScan() tea.Cmd {
+	if m.cancel != nil {
+		m.cancel()
+	}
+	ctx, cancel := context.WithCancel(m.root)
+	m.cancel = cancel
+	m.reposLoading = true
+	m.reposErr = nil
+
+	roots := m.chosen.roots
+	return func() tea.Msg {
+		result, err := scanAll(ctx, roots)
+		return reposLoadedMsg{repositories: result.Repositories, err: err}
+	}
+}
+
+// toggleExclude flips whether the selected repository is scanned at all.
+func (m *calendarModel) toggleExclude() {
+	if m.reposIndex >= len(m.repos) {
+		return
+	}
+	repository := m.repos[m.reposIndex]
+	if m.chosen.filter.includes(repository) {
+		m.chosen.config.exclude(repository)
+	} else {
+		m.chosen.config.include(repository)
+	}
+	m.saveChosen()
+}
+
+// setGroup assigns the selected repository's group. An empty name clears it,
+// which matches what a text field reads when nothing has been typed into it.
+func (m *calendarModel) setGroup(name string) {
+	if m.reposIndex >= len(m.repos) {
+		return
+	}
+	m.chosen.config.setGroup(m.repos[m.reposIndex], name)
+	m.saveChosen()
+}
+
+// currentGroup reads back what setGroup would need to reproduce, so opening
+// the text field starts from the repository's existing group rather than
+// blank.
+func (m calendarModel) currentGroup() string {
+	if m.reposIndex >= len(m.repos) {
+		return ""
+	}
+	if group := m.chosen.filter.groupOf(m.repos[m.reposIndex]); group != ungrouped {
+		return group
+	}
+	return ""
+}
+
+// saveChosen writes the edited configuration immediately, rather than waiting
+// for the picker to close, so a change survives even if the program is killed
+// right afterwards.
+func (m *calendarModel) saveChosen() {
+	m.chosen.filter = m.chosen.config.filter(m.chosen.group)
+	m.reposChanged = true
+	m.reposSaveErr = saveConfig(m.chosen.path, m.chosen.config)
+}
+
 func (m calendarModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
@@ -114,6 +200,14 @@ func (m calendarModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.commit = 0
 		return m, nil
 
+	case reposLoadedMsg:
+		m.reposLoading = false
+		m.repos, m.reposErr = message.repositories, message.err
+		if m.reposIndex >= len(m.repos) {
+			m.reposIndex = 0
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(message)
 	}
@@ -121,6 +215,18 @@ func (m calendarModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m calendarModel) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// While a group name is being typed, every character belongs to the text
+	// field. Only Ctrl+C still ends the program; even q must be typeable.
+	if m.mode == viewRepos && m.editingGroup {
+		if key.Type == tea.KeyCtrlC {
+			if m.cancel != nil {
+				m.cancel()
+			}
+			return m, tea.Quit
+		}
+		return m.handleGroupInputKey(key)
+	}
+
 	switch key.String() {
 	case "ctrl+c", "q":
 		if m.cancel != nil {
@@ -131,13 +237,89 @@ func (m calendarModel) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.help = !m.help
 		return m, nil
 	case "r":
+		if m.mode == viewRepos {
+			return m, (&m).beginReposScan()
+		}
 		return m, (&m).beginLoad()
+	case "g":
+		if m.mode == viewGrid {
+			m.mode, m.reposIndex = viewRepos, 0
+			return m, (&m).beginReposScan()
+		}
 	}
 
-	if m.mode == viewGrid {
+	switch m.mode {
+	case viewGrid:
 		return m.handleGridKey(key)
+	case viewRepos:
+		return m.handleReposKey(key)
 	}
 	return m.handleListKey(key)
+}
+
+func (m calendarModel) handleReposKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "esc", "backspace", "left", "h":
+		m.mode = viewGrid
+		if m.reposChanged {
+			// A group or exclusion changed, so the grid it is about to show
+			// again would otherwise contradict what was just edited.
+			m.reposChanged = false
+			return m, (&m).beginLoad()
+		}
+		return m, nil
+	case "up", "k":
+		if m.reposIndex > 0 {
+			m.reposIndex--
+		}
+		return m, nil
+	case "down", "j":
+		if m.reposIndex < len(m.repos)-1 {
+			m.reposIndex++
+		}
+		return m, nil
+	case "enter":
+		if len(m.repos) == 0 {
+			return m, nil
+		}
+		m.editingGroup = true
+		m.groupInput = m.currentGroup()
+		return m, nil
+	case "e":
+		if len(m.repos) == 0 {
+			return m, nil
+		}
+		(&m).toggleExclude()
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleGroupInputKey builds the typed text one key at a time. tea.KeyType is
+// used instead of key.String() so that a character with special meaning
+// elsewhere, such as q or ?, is still just a character here.
+func (m calendarModel) handleGroupInputKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyEsc:
+		m.editingGroup = false
+		return m, nil
+	case tea.KeyEnter:
+		m.editingGroup = false
+		(&m).setGroup(strings.TrimSpace(m.groupInput))
+		return m, nil
+	case tea.KeyBackspace:
+		if runes := []rune(m.groupInput); len(runes) > 0 {
+			m.groupInput = string(runes[:len(runes)-1])
+		}
+		return m, nil
+	case tea.KeySpace:
+		m.groupInput += " "
+		return m, nil
+	case tea.KeyRunes:
+		m.groupInput += string(key.Runes)
+		return m, nil
+	}
+	return m, nil
 }
 
 func (m calendarModel) handleGridKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -246,6 +428,8 @@ func (m calendarModel) View() string {
 		}
 		return renderCommitDetail(entries[m.commit], m.month.Location(), m.styles) +
 			"\n" + m.status("esc back · q quit")
+	case viewRepos:
+		return m.reposView()
 	}
 
 	grid := Activity{Month: m.month}
@@ -259,8 +443,70 @@ func (m calendarModel) View() string {
 		EntriesPerDay: m.entriesPerDay,
 		Group:         m.chosen.group,
 		Styles:        m.styles,
-		Footer:        m.status("←↑↓→ date · [ ] month · enter open · t today · r refresh · ? help · q quit"),
+		Footer:        m.status("←↑↓→ date · [ ] month · enter open · g repos · t today · r refresh · ? help · q quit"),
 	})
+}
+
+// reposView lists every discovered repository with its current group or
+// exclusion, so assigning one never requires leaving the calendar.
+func (m calendarModel) reposView() string {
+	var output strings.Builder
+	output.WriteString(m.styles.heading.render("Repositories") + "\n\n")
+
+	switch {
+	case m.reposLoading:
+		output.WriteString(m.styles.loading.render("Scanning your configured folders…") + "\n")
+		return output.String()
+	case m.reposErr != nil:
+		output.WriteString(m.styles.failure.render("Error: "+displayText(m.reposErr.Error())) + "\n\n")
+		output.WriteString(m.styles.status.render("r retries · esc back · q quit") + "\n")
+		return output.String()
+	case len(m.repos) == 0:
+		output.WriteString(m.styles.status.render("No repositories found under your configured folders.") + "\n\n")
+		output.WriteString(m.styles.status.render("esc back · q quit") + "\n")
+		return output.String()
+	}
+
+	width := 0
+	for _, repository := range m.repos {
+		if name := filepath.Base(repository); len(name) > width {
+			width = len(name)
+		}
+	}
+	for index, repository := range m.repos {
+		marker := "  "
+		if index == m.reposIndex {
+			marker = "▸ "
+		}
+		name := displayText(filepath.Base(repository))
+		included := m.chosen.filter.includes(repository)
+		state := m.chosen.filter.groupOf(repository)
+		stateStyle := m.styles.status
+		switch {
+		case !included:
+			state, stateStyle = "excluded", m.styles.failure
+		case state != ungrouped:
+			stateStyle = m.styles.label
+		}
+		fmt.Fprintf(&output, "%s%s  %s  %s\n", marker,
+			m.styles.repository(name).render(fmt.Sprintf("%-*s", width, name)),
+			stateStyle.render(fmt.Sprintf("%-10s", state)),
+			m.styles.status.render(displayText(repository)))
+	}
+	output.WriteString("\n")
+
+	if m.editingGroup {
+		fmt.Fprintf(&output, "%s%s▏\n", m.styles.label.render("  Group: "), m.groupInput)
+		output.WriteString(m.styles.status.render(
+			"type a name · enter save (blank clears the group) · esc cancel") + "\n")
+		return output.String()
+	}
+	if m.reposSaveErr != nil {
+		output.WriteString(m.styles.failure.render("Could not save: "+displayText(m.reposSaveErr.Error())) + "\n")
+	}
+	output.WriteString(m.styles.status.render(
+		"↑↓ move · enter set group · e exclude/include · r rescan · esc back · q quit") + "\n")
+	return output.String()
 }
 
 // status keeps loading and failure visible in the same place as the key hints,
@@ -288,7 +534,8 @@ var helpKeys = [][2]string{
 	{"Enter", "Open the selected date, then the selected commit"},
 	{"Esc", "Back up one level"},
 	{"t", "Jump to today"},
-	{"r", "Re-read the current month"},
+	{"r", "Re-read the current month, or rescan repositories in the picker"},
+	{"g", "Open the repository picker: assign groups, exclude/include"},
 	{"?", "Close this help"},
 	{"q, Ctrl+C", "Quit"},
 }
