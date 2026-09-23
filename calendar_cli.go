@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 )
 
@@ -21,9 +22,12 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 	dayText := options.String("day", "", "list every commit for one date (YYYY-MM-DD) instead of the grid")
 	width := options.Int("width", 0, "grid width in columns; 0 detects the terminal")
 	entriesPerDay := options.Int("per-day", defaultEntriesPerDay, `commits shown in each date cell before "+N more"`)
+	interactive := options.Bool("interactive", false, "browse the calendar with the keyboard even when output is redirected")
+	static := options.Bool("static", false, "print the grid once and exit, even on a terminal")
 	options.Usage = func() {
 		fmt.Fprintln(options.Output(), "Usage: gitcal calendar [--month YYYY-MM] [--day YYYY-MM-DD] [--per-day N] [--width N] <folder>")
 		fmt.Fprintln(options.Output(), "Place options before the folder; omit --month for the current month.")
+		fmt.Fprintln(options.Output(), "On a terminal the calendar is interactive; redirected output is printed once.")
 		options.PrintDefaults()
 	}
 	if err := options.Parse(args); err != nil {
@@ -51,6 +55,10 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 		fmt.Fprintln(errOut, "Error: --per-day must be 1 or more.")
 		return 2
 	}
+	if *interactive && *static {
+		fmt.Fprintln(errOut, "Error: use --interactive or --static, not both.")
+		return 2
+	}
 
 	// A date selects its own month, so both paths read the same activity data.
 	layout, value := "2006-01", *monthText
@@ -65,6 +73,12 @@ func runCalendar(ctx context.Context, args []string, out, errOut io.Writer) int 
 			fmt.Fprintln(errOut, "Error: --month must be YYYY-MM with year 0001–9999 and month 01–12 (for example, 2026-09).")
 		}
 		return 2
+	}
+
+	// The interactive view reads each month itself, so it starts before any scan.
+	if *dayText == "" && !*static && (*interactive || canBeInteractive(out)) {
+		return runInteractiveCalendar(ctx, options.Arg(0), selected, *entriesPerDay,
+			resolveWidth(out, *width), errOut)
 	}
 
 	activity, err := collectActivity(ctx, options.Arg(0), selected)
@@ -106,6 +120,28 @@ func resolveWidth(out io.Writer, override int) int {
 		}
 	}
 	return fallbackWidth
+}
+
+// canBeInteractive requires a terminal on both ends: keyboard control needs a
+// real stdin, and redirected output must stay plain text for scripts.
+func canBeInteractive(out io.Writer) bool {
+	file, ok := out.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd())) && term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+func runInteractiveCalendar(ctx context.Context, folder string, month time.Time, entriesPerDay, width int, errOut io.Writer) int {
+	model := newCalendarModel(ctx, folder, month, entriesPerDay, width)
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx))
+	finished, err := program.Run()
+	if err != nil && !errors.Is(err, tea.ErrProgramKilled) && !errors.Is(err, context.Canceled) {
+		fmt.Fprintf(errOut, "Error: %v\n", err)
+		return 1
+	}
+	if final, ok := finished.(calendarModel); ok && final.loadErr != nil {
+		fmt.Fprintf(errOut, "Error: %v\n", final.loadErr)
+		return 1
+	}
+	return 0
 }
 
 func supportsHighlight(out io.Writer) bool {

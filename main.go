@@ -24,10 +24,13 @@ and merge commits. Author timestamps are displayed in your local timezone.
 Activity groups that month's commits across discovered repositories by local
 author date, counting identical hashes once. Default: current month.
 Calendar shows the same month as a grid of weeks starting on Monday, with a
-few commits inside each date and "+N more" for the rest; --day lists one
-date in full. Place options before the folder. These commands read full
-histories; large repositories can take time. All authors and merges are
-included. Quote paths containing spaces. Use Ctrl+C to cancel.
+few commits inside each date and "+N more" for the rest. On a terminal it is
+interactive: arrow keys move between dates, [ and ] change month, Enter opens
+a date and then a commit, and ? lists every key. Redirected output is printed
+once instead. --day lists one date in full. Place options before the folder.
+These commands read full histories; large repositories can take time. All
+authors and merges are included. Quote paths containing spaces.
+Use Ctrl+C to cancel.
 `
 
 func main() {

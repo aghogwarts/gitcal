@@ -1,20 +1,20 @@
-# gitcal — step 4: the static month grid
+# gitcal — step 5: an interactive month calendar
 
 A learning project for a local Git calendar, written in Go.
 
 The planned interface is a traditional monthly calendar with commits as events
 inside each day, optional repository groups, and filters. **This version discovers
-repositories, reads recent history, combines one month's commits across
-repositories, and draws them as a month grid.** The grid is printed once: there
-is no keyboard navigation, and settings are not saved yet.
+repositories, reads their history, and presents one month at a time as a calendar
+you can move around with the keyboard.** Repository groups, author filtering, and
+saved settings are not implemented yet.
 `gitcal` is a working name, not a checked or reserved public project name.
 
 ## Requirements
 
 - Install Go 1.26 or newer from https://go.dev/dl/.
 - Install Git and ensure `git --version` works in your terminal.
-- Step 4 added two dependencies whose current releases require Go 1.26; `go.mod`
-  therefore declares that floor. `go run` and `go build` download them on first use.
+- Steps 4 and 5 added third-party dependencies; `go.mod` declares a Go 1.26 floor
+  because of them. `go run` and `go build` download them on first use.
 
 ## Run
 
@@ -146,9 +146,10 @@ history into memory before filtering, one repository at a time. Large histories
 and broad scan roots can be slow. Start with a small projects folder. Streaming,
 caching, progress reporting, and saved repository selections are future work.
 
-## Draw the month as a calendar
+## Browse the month as a calendar
 
 `calendar` reads the same data as `activity` and lays it out as a month grid.
+On a terminal it is interactive; redirected output is printed once and exits.
 Pass the same parent folder, with options before it.
 
 ```powershell
@@ -170,20 +171,39 @@ go run . calendar --day 2026-09-18 "path/to/projects"
 
 `go run . calendar --help` lists the options.
 
-| Option      | Effect                                                            |
-| ----------- | ----------------------------------------------------------------- |
-| `--month`   | Month to draw, `YYYY-MM`; defaults to the current local month      |
-| `--day`     | List one date's commits in full instead of drawing the grid        |
-| `--per-day` | Commits shown in each date cell before `+N more`; default 3        |
-| `--width`   | Grid width in columns; `0` (default) detects the terminal          |
+| Option          | Effect                                                        |
+| --------------- | ------------------------------------------------------------- |
+| `--month`       | Month to draw, `YYYY-MM`; defaults to the current local month  |
+| `--day`         | List one date's commits in full and exit                       |
+| `--per-day`     | Commits shown in each date cell before `+N more`; default 3    |
+| `--width`       | Grid width in columns; `0` (default) detects the terminal      |
+| `--interactive` | Force the keyboard interface even when output is redirected    |
+| `--static`      | Force a single printed grid even on a terminal                 |
 
+### Keys
+
+| Key            | Action                                                   |
+| -------------- | --------------------------------------------------------- |
+| `← → ↑ ↓`      | Move between dates; stops at the month's edge             |
+| `h l k j`      | The same without arrow keys                               |
+| `[` `]`        | Previous / next month, also `PgUp` and `PgDn`             |
+| `Enter`        | Open the selected date, then the selected commit          |
+| `Esc`          | Back up one level                                         |
+| `t`            | Jump to today                                             |
+| `r`            | Re-read the current month                                 |
+| `?`            | Toggle the key reference                                  |
+| `q`, `Ctrl+C`  | Quit                                                      |
+
+- Every month change re-reads all history, so a large projects folder takes a
+  moment. The footer reports progress, and superseded scans are cancelled.
 - Weeks start on **Monday**. A configurable Sunday start is future work.
 - The grid sizes itself to the terminal, clamped between 78 and 204 columns.
   Redirecting output to a file or pipe uses 80 columns.
 - Cells carry the commit subject, adding the repository name and then the time
   as the terminal grows. Text is shortened by **display width**, so emoji and
   East Asian characters stay aligned.
-- Today's date is highlighted when output is a terminal and `NO_COLOR` is unset.
+- Today is shown in reverse video and the selected date underlined, so a date
+  that is both remains distinguishable. Static output honours `NO_COLOR`.
 - `--day` and `--month` cannot be combined: a date already identifies its month.
 - The summary below the grid counts every commit in the month, not the visible
   ones. Use `--day` or raise `--per-day` to see the rest.
@@ -212,9 +232,9 @@ Exit codes: `0` success/help (including empty results), `1` failure or incomplet
 ## Intentional limits of this increment
 
 One scan root or history repository per invocation; no remembered roots, groups,
-caching, progress indicator, or automatic dependency-folder exclusions. The
-calendar is drawn once and exits: no keyboard navigation, date selection, or
-month paging. Large directory trees may take time to scan. Bare repositories are
+caching, or automatic dependency-folder exclusions. The interactive calendar
+re-reads every repository on each month change and does not scroll the grid
+itself. Large directory trees may take time to scan. Bare repositories are
 not discovered because this increment looks for working checkouts with a `.git`
 marker. Separate worktrees appear separately in `scan`, while `activity` and
 `calendar` deduplicate their commits. The `scan`, `activity`, and `calendar`
@@ -228,8 +248,9 @@ See `VERIFICATION.md` for the checks performed on this increment and their limit
 
 Read [WALKTHROUGH.md](WALKTHROUGH.md) for discovery,
 [STEP-2-WALKTHROUGH.md](STEP-2-WALKTHROUGH.md) for single-repository history,
-[STEP-3-WALKTHROUGH.md](STEP-3-WALKTHROUGH.md) for monthly activity, and
-[STEP-4-WALKTHROUGH.md](STEP-4-WALKTHROUGH.md) for the month grid.
+[STEP-3-WALKTHROUGH.md](STEP-3-WALKTHROUGH.md) for monthly activity,
+[STEP-4-WALKTHROUGH.md](STEP-4-WALKTHROUGH.md) for the month grid, and
+[STEP-5-WALKTHROUGH.md](STEP-5-WALKTHROUGH.md) for the interactive interface.
 
 | File               | Purpose                                                         |
 | ------------------ | --------------------------------------------------------------- |
@@ -239,16 +260,20 @@ Read [WALKTHROUGH.md](WALKTHROUGH.md) for discovery,
 | `history.go`       | Commit data, HEAD resolution, history retrieval and parsing     |
 | `activity.go`      | Month filtering, deduplication, provenance and date grouping    |
 | `activity_cli.go`  | Activity flags and agenda output                                |
-| `calendar.go`      | Month arithmetic and grid layout, with no terminal access       |
-| `calendar_cli.go`  | Calendar flags, terminal width detection and the day view       |
+| `calendar.go`      | Month arithmetic and all layout, with no terminal access        |
+| `calendar_cli.go`  | Calendar flags, terminal detection, static and day output       |
+| `tui.go`           | Bubble Tea model: state, keys, loading and the three views      |
 | `scan_test.go`     | Original discovery tests                                        |
 | `history_test.go`  | Real-repository integration tests and parser checks             |
 | `activity_test.go` | Multiple repositories, date boundaries, duplicates and failures |
 | `calendar_test.go` | Layout alignment, week placement, overflow and highlighting     |
+| `tui_test.go`      | Key handling, month clamping, stale scans and view transitions  |
 
-Two third-party dependencies arrived with step 4: `golang.org/x/term` for
-terminal size, and `github.com/charmbracelet/x/ansi` for display-width
-truncation. All four commands remain available.
+Three direct dependencies: `golang.org/x/term` for terminal size,
+`github.com/charmbracelet/x/ansi` for display-width truncation, and
+`github.com/charmbracelet/bubbletea` for the interactive interface. `ansi` is
+pinned to v0.10.x because Bubble Tea's rendering stack is incompatible with
+v0.11. All four commands remain available.
 
 The module name is deliberately local for now. When a GitHub repository is chosen,
 we can change it to that repository's import path. Publishing and a license choice

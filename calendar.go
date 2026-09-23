@@ -30,8 +30,10 @@ const (
 type calendarOptions struct {
 	Width         int    // Total columns available for the grid.
 	Today         string // YYYY-MM-DD, used only to highlight that cell.
+	Selected      string // YYYY-MM-DD, set only by the interactive view.
 	Highlight     bool   // Emit ANSI codes; false for pipes and NO_COLOR.
 	EntriesPerDay int
+	Footer        string // Replaces the default hint below the grid.
 }
 
 // cellWidth divides the terminal between seven columns and the eight vertical
@@ -116,8 +118,12 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 
 	fmt.Fprintf(&output, "\n%d unique commits on %d days; read %d of %d discovered repositories.\n",
 		total, len(activity.Days), activity.ReadRepositories, activity.DiscoveredRepositories)
-	fmt.Fprintf(&output, "Showing up to %d commits per date. Use --day YYYY-MM-DD for one date's full list.\n",
-		options.EntriesPerDay)
+	footer := options.Footer
+	if footer == "" {
+		footer = fmt.Sprintf("Showing up to %d commits per date. Use --day YYYY-MM-DD for one date's full list.",
+			options.EntriesPerDay)
+	}
+	fmt.Fprintln(&output, footer)
 	return output.String()
 }
 
@@ -125,8 +131,17 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 // fit the caller's limit, then a count of whatever had to be left out.
 func dayLines(date time.Time, entries []ActivityEntry, options calendarOptions, text int, location *time.Location) []string {
 	number := strconv.Itoa(date.Day())
-	if options.Highlight && date.Format("2006-01-02") == options.Today {
-		number = "\x1b[7m " + number + " \x1b[0m"
+	if options.Highlight {
+		// Today and the selection need distinct styles, and one date can be both.
+		key := date.Format("2006-01-02")
+		switch {
+		case key == options.Today && key == options.Selected:
+			number = "\x1b[1;4;7m " + number + " \x1b[0m"
+		case key == options.Today:
+			number = "\x1b[7m " + number + " \x1b[0m"
+		case key == options.Selected:
+			number = "\x1b[1;4m " + number + " \x1b[0m"
+		}
 	}
 	lines := []string{number}
 
@@ -201,5 +216,85 @@ func renderDay(activity Activity, date string) string {
 		return output.String()
 	}
 	fmt.Fprintf(&output, "%s — no commits in the repositories successfully read.\n", date)
+	return output.String()
+}
+
+func entriesForDate(activity Activity, date string) []ActivityEntry {
+	for _, day := range activity.Days {
+		if day.Date == date {
+			return day.Entries
+		}
+	}
+	return nil
+}
+
+// renderDayList is the interactive counterpart to renderDay: one line per
+// commit, scrolled to keep the selection visible when a date is busy.
+func renderDayList(activity Activity, date string, selected, width, height int) string {
+	entries := entriesForDate(activity, date)
+	var output strings.Builder
+	fmt.Fprintf(&output, "%s — %d commits\n\n", date, len(entries))
+	if len(entries) == 0 {
+		output.WriteString("  No commits on this date.\n")
+		return output.String()
+	}
+
+	visible := height
+	if visible < 1 {
+		visible = len(entries)
+	}
+	start := 0
+	if len(entries) > visible {
+		start = selected - visible/2
+		if start < 0 {
+			start = 0
+		}
+		if start > len(entries)-visible {
+			start = len(entries) - visible
+		}
+	}
+	end := start + visible
+	if end > len(entries) {
+		end = len(entries)
+	}
+
+	if start > 0 {
+		fmt.Fprintf(&output, "  ↑ %d earlier\n", start)
+	}
+	for index := start; index < end; index++ {
+		commit := entries[index].Commit
+		marker := "  "
+		if index == selected {
+			marker = "▸ "
+		}
+		line := fmt.Sprintf("%s%s  %.12s  %s", marker,
+			commit.AuthoredAt.In(activity.Month.Location()).Format("15:04"),
+			commit.Hash, displayText(commit.Subject))
+		if repositories := entries[index].Repositories; len(repositories) > 0 {
+			line += "  · " + displayText(filepath.Base(repositories[0]))
+		}
+		output.WriteString(ansi.Truncate(line, width, "…") + "\n")
+	}
+	if end < len(entries) {
+		fmt.Fprintf(&output, "  ↓ %d later\n", len(entries)-end)
+	}
+	return output.String()
+}
+
+func renderCommitDetail(entry ActivityEntry, location *time.Location) string {
+	commit := entry.Commit
+	var output strings.Builder
+	fmt.Fprintf(&output, "%s\n\n", displayText(commit.Subject))
+	fmt.Fprintf(&output, "  Commit  %s\n", commit.Hash)
+	fmt.Fprintf(&output, "  Author  %s <%s>\n", displayText(commit.AuthorName), displayText(commit.AuthorEmail))
+	fmt.Fprintf(&output, "  Date    %s\n", commit.AuthoredAt.In(location).Format("Monday, 2 January 2006, 15:04 -07:00"))
+	for index, repository := range entry.Repositories {
+		label := "  Repo    "
+		if index > 0 {
+			label = "          "
+		}
+		fmt.Fprintf(&output, "%s%s\n", label, displayText(repository))
+	}
+	output.WriteString("\nOnly the subject line is stored; full commit bodies are not read yet.\n")
 	return output.String()
 }
