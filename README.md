@@ -145,13 +145,16 @@ path(s). The final line gives unique-commit, active-day, and repository counts.
 - This is the data preparation step for the calendar grid below. It prints only
   days with activity; `calendar` renders every date in the month.
 
-**Performance:** the first visit to a month reads each selected repository's
-entire reachable history into memory before filtering, one repository at a time.
-Large histories and broad scan roots can be slow. The interactive calendar keeps
-up to six completed month/filter views in memory during that run, so revisiting
-one needs no scan. `r` reads fresh data; a new run starts with an empty cache.
-`activity` and the static calendar still read fresh data every time. Streaming,
-progress reporting, and saved repository selections are future work.
+**Performance:** the first visit to a month still traverses each selected
+repository's complete reachable history. Git's output is now read as a stream:
+only commits authored in the requested month are kept in memory. Filtering by
+Git's commit-date flags could omit commits whose author and committer dates
+differ, so gitcal checks author dates as it reads. Large histories and broad
+scan roots can still be slow. The interactive calendar keeps up to six completed
+month/filter views in memory during that run, so revisiting one needs no scan.
+`r` reads fresh data; a new run starts with an empty cache. `activity` and the
+static calendar still read fresh data every time. Faster first loads, progress
+reporting, and saved repository selections are future work.
 
 ## Browse the month as a calendar
 

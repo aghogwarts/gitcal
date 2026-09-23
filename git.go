@@ -9,9 +9,9 @@ import (
 	"strings"
 )
 
-// runGit is shared by discovery and history. Git's stdout is data; stderr is
-// diagnostic text and must never become part of the data we parse.
-func runGit(ctx context.Context, gitPath, repo, marker string, args ...string) ([]byte, error) {
+// Both buffered commands and the streaming history reader use the same Git
+// environment, so repository configuration cannot redirect their output.
+func gitCommand(ctx context.Context, gitPath, repo, marker string, args ...string) *exec.Cmd {
 	commandArgs := []string{"--no-pager", "--git-dir", marker, "--work-tree", repo}
 	commandArgs = append(commandArgs, args...)
 	cmd := exec.CommandContext(ctx, gitPath, commandArgs...)
@@ -22,6 +22,12 @@ func runGit(ctx context.Context, gitPath, repo, marker string, args ...string) (
 			cmd.Env = append(cmd.Env, variable)
 		}
 	}
+	return cmd
+}
+
+// runGit captures small Git results. History for the calendar uses a pipe.
+func runGit(ctx context.Context, gitPath, repo, marker string, args ...string) ([]byte, error) {
+	cmd := gitCommand(ctx, gitPath, repo, marker, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()

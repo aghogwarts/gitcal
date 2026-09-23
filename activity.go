@@ -52,7 +52,7 @@ func collectActivity(ctx context.Context, roots []string, month time.Time, filte
 
 	byHash := make(map[string]*ActivityEntry)
 	for _, repo := range selected {
-		commits, err := readCommits(ctx, repo, 0)
+		commits, err := readMonthCommits(ctx, repo, start, end)
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
@@ -64,11 +64,6 @@ func collectActivity(ctx context.Context, roots []string, month time.Time, filte
 		for _, commit := range commits {
 			if err := ctx.Err(); err != nil {
 				return result, err
-			}
-			// Compare instants against local month boundaries, never date strings
-			// in the commit's original timezone or a 20-commit sample.
-			if commit.AuthoredAt.Before(start) || !commit.AuthoredAt.Before(end) {
-				continue
 			}
 			if existing, ok := byHash[commit.Hash]; ok {
 				existing.Repositories = append(existing.Repositories, repo)

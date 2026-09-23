@@ -72,6 +72,35 @@ func TestHistoryFieldsLimitAndBranchScope(t *testing.T) {
 	}
 }
 
+func TestMonthHistoryFiltersAuthorTimeWhileStreaming(t *testing.T) {
+	repo := historyRepo(t)
+	historyCommit(t, repo, "author in September", "2026-09-03T10:00:00Z", "2026-11-01T10:00:00Z")
+	historyCommit(t, repo, "committer in September", "2026-10-03T10:00:00Z", "2026-09-10T10:00:00Z")
+	historyCommit(t, repo, "older author", "2026-08-03T10:00:00Z", "2026-12-01T10:00:00Z")
+	start := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	commits, err := readMonthCommits(context.Background(), repo, start, start.AddDate(0, 1, 0))
+	if err != nil || len(commits) != 1 || commits[0].Subject != "author in September" {
+		t.Fatalf("author-date month selection: %+v, %v", commits, err)
+	}
+}
+
+func TestStreamingMonthParserChecksRecordBoundaries(t *testing.T) {
+	start := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	for _, data := range []string{
+		"hash\x00author\x00email\x002026-09-02T10:00:00Z\x00missing terminator",
+		"hash\x00author\x00email\x00invalid-date\x00subject\x00",
+	} {
+		if _, err := parseMonthHistory(strings.NewReader(data), start, start.AddDate(0, 1, 0)); err == nil {
+			t.Fatalf("malformed streaming record was accepted: %q", data)
+		}
+	}
+	data := "hash\x00author\x00email\x002026-09-02T10:00:00Z\x00" + strings.Repeat("x", 70*1024) + "\x00"
+	commits, err := parseMonthHistory(strings.NewReader(data), start, start.AddDate(0, 1, 0))
+	if err != nil || len(commits) != 1 || len(commits[0].Subject) != 70*1024 {
+		t.Fatalf("large subject crossed a read boundary incorrectly: %d commits, %v", len(commits), err)
+	}
+}
+
 func TestHistoryEmptyBranchAndWorktree(t *testing.T) {
 	repo := historyRepo(t)
 	commits, err := readHistory(context.Background(), repo)
