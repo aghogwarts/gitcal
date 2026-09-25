@@ -93,7 +93,7 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 	output.WriteString("\n")
 
 	for start := 1 - offset; start <= daysInMonth; start += 7 {
-		output.WriteString(horizontalRule(style, cell, "├", "┼", "┤"))
+		output.WriteString(weekRule(style, cell))
 
 		// Every cell in a week shares the tallest cell's height, which keeps
 		// the vertical rules aligned down the whole grid.
@@ -238,6 +238,15 @@ func horizontalRule(style styles, cell int, left, join, right string) string {
 		segments[i] = strings.Repeat("─", cell)
 	}
 	return style.border.render(left+strings.Join(segments, join)+right) + "\n"
+}
+
+// A dashed, dim rule separates weeks without competing with commit text.
+func weekRule(style styles, cell int) string {
+	segments := make([]string, calendarColumns)
+	for i := range segments {
+		segments[i] = strings.Repeat("┄", cell)
+	}
+	return style.weekRule.render("├"+strings.Join(segments, "┼")+"┤") + "\n"
 }
 
 // cellContents shortens and pads by display width, so East Asian characters,

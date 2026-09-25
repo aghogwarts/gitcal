@@ -269,7 +269,8 @@ line is for scripting or editing several repositories at once.
   produce plain text.
 - Today is a filled badge, and the selected date has an accent along its cell
   and a lighter date badge. Plain terminals mark today with `*` and the
-  selection with brackets. Weekends are tinted, and empty dates are dimmed.
+  selection with brackets. Weekends with activity are tinted; empty dates and
+  internal week separators are dimmed so commit text carries more visual weight.
 - Each repository keeps its own colour, derived from its name so it stays the
   same as months change and as other repositories come and go.
 - `--day` and `--month` cannot be combined: a date already identifies its month.

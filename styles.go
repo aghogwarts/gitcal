@@ -52,6 +52,7 @@ type styles struct {
 	enabled bool
 
 	border        paint
+	weekRule      paint
 	weekday       paint
 	weekendName   paint
 	date          paint
@@ -89,12 +90,13 @@ func newStyles(enabled bool) styles {
 	built := styles{
 		enabled:      enabled,
 		border:       of(func(s lipgloss.Style) lipgloss.Style { return s.Foreground(colourFaint) }),
+		weekRule:     of(func(s lipgloss.Style) lipgloss.Style { return s.Foreground(colourFaint).Faint(true) }),
 		weekday:      of(func(s lipgloss.Style) lipgloss.Style { return s.Foreground(colourMuted).Bold(true) }),
 		weekendName:  of(func(s lipgloss.Style) lipgloss.Style { return s.Foreground(colourWeekend).Bold(true) }),
 		date:         of(func(s lipgloss.Style) lipgloss.Style { return s.Foreground(colourStrong).Bold(true) }),
-		quietDate:    of(func(s lipgloss.Style) lipgloss.Style { return s.Foreground(colourFaint) }),
+		quietDate:    of(func(s lipgloss.Style) lipgloss.Style { return s.Foreground(colourFaint).Faint(true) }),
 		weekendDate:  of(func(s lipgloss.Style) lipgloss.Style { return s.Foreground(colourWeekend).Bold(true) }),
-		quietWeekend: of(func(s lipgloss.Style) lipgloss.Style { return s.Foreground(colourWeekend).Faint(true) }),
+		quietWeekend: of(func(s lipgloss.Style) lipgloss.Style { return s.Foreground(colourMuted).Faint(true) }),
 		today: of(func(s lipgloss.Style) lipgloss.Style {
 			return s.Background(colourAccent).Foreground(colourOnAccent).Bold(true)
 		}),
