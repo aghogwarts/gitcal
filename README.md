@@ -267,9 +267,9 @@ line is for scripting or editing several repositories at once.
 - Colours adapt to light and dark terminal backgrounds, and degrade on
   terminals with limited colour support. Redirected output and `NO_COLOR`
   produce plain text.
-- Today is a filled badge, the selected date a lighter one, and a date that is
-  both adds an underline. Weekends are tinted, and dates with no commits are
-  dimmed so active dates stand out.
+- Today is a filled badge, and the selected date has an accent along its cell
+  and a lighter date badge. Plain terminals mark today with `*` and the
+  selection with brackets. Weekends are tinted, and empty dates are dimmed.
 - Each repository keeps its own colour, derived from its name so it stays the
   same as months change and as other repositories come and go.
 - `--day` and `--month` cannot be combined: a date already identifies its month.

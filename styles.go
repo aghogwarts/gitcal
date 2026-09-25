@@ -60,6 +60,7 @@ type styles struct {
 	quietWeekend  paint
 	today         paint
 	selected      paint
+	selectedEdge  paint
 	todaySelected paint
 	time          paint
 	more          paint
@@ -99,6 +100,9 @@ func newStyles(enabled bool) styles {
 		}),
 		selected: of(func(s lipgloss.Style) lipgloss.Style {
 			return s.Background(colourSelection).Foreground(colourStrong).Bold(true)
+		}),
+		selectedEdge: of(func(s lipgloss.Style) lipgloss.Style {
+			return s.Foreground(colourAccent).Bold(true)
 		}),
 		todaySelected: of(func(s lipgloss.Style) lipgloss.Style {
 			return s.Background(colourAccent).Foreground(colourOnAccent).Bold(true).Underline(true)

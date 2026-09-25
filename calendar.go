@@ -98,6 +98,7 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 		// Every cell in a week shares the tallest cell's height, which keeps
 		// the vertical rules aligned down the whole grid.
 		columns := make([][]string, calendarColumns)
+		selectedColumn := -1
 		height := 1
 		for column := range columns {
 			number := start + column
@@ -105,6 +106,9 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 				continue
 			}
 			date := time.Date(month.Year(), month.Month(), number, 0, 0, 0, 0, location)
+			if date.Format("2006-01-02") == options.Selected {
+				selectedColumn = column
+			}
 			columns[column] = dayLines(date, byDate[date.Format("2006-01-02")], options, text, location, isWeekend(column))
 			if len(columns[column]) > height {
 				height = len(columns[column])
@@ -112,15 +116,19 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 		}
 
 		for row := 0; row < height; row++ {
-			output.WriteString(bar)
-			for _, lines := range columns {
+			for column, lines := range columns {
+				if column == selectedColumn {
+					output.WriteString(style.selectedEdge.render("│"))
+				} else {
+					output.WriteString(bar)
+				}
 				line := ""
 				if row < len(lines) {
 					line = lines[row]
 				}
 				output.WriteString(cellContents(line, cell))
-				output.WriteString(bar)
 			}
+			output.WriteString(bar)
 			output.WriteString("\n")
 		}
 	}
@@ -155,6 +163,16 @@ func dayLines(date time.Time, entries []ActivityEntry, options calendarOptions, 
 	style := options.Styles
 	key := date.Format("2006-01-02")
 	number := " " + strconv.Itoa(date.Day()) + " "
+	if !style.enabled {
+		switch {
+		case key == options.Today && key == options.Selected:
+			number = "[*" + strconv.Itoa(date.Day()) + "]"
+		case key == options.Today:
+			number = "*" + strconv.Itoa(date.Day()) + "*"
+		case key == options.Selected:
+			number = "[" + strconv.Itoa(date.Day()) + "]"
+		}
+	}
 
 	// Today and the selection are badges, and one date can be both. Otherwise
 	// the weekend tint and whether the date has any commits decide the colour.
