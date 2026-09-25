@@ -100,9 +100,8 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 	}
 	output.WriteString("\n")
 
+	previousSelectedColumn := -1
 	for start := 1 - offset; start <= daysInMonth; start += 7 {
-		output.WriteString(weekRule(style, cell))
-
 		// Every cell in a week shares the tallest cell's height, which keeps
 		// the vertical rules aligned down the whole grid.
 		columns := make([][]string, calendarColumns)
@@ -123,9 +122,17 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 			}
 		}
 
+		// A boundary is the current week's top and the previous week's bottom.
+		// Highlight either side when it belongs to the selected cell.
+		boundarySelection := selectedColumn
+		if boundarySelection < 0 {
+			boundarySelection = previousSelectedColumn
+		}
+		output.WriteString(weekRule(style, cell, boundarySelection))
+
 		for row := 0; row < height; row++ {
 			for column, lines := range columns {
-				if column == selectedColumn {
+				if column == selectedColumn || column == selectedColumn+1 {
 					output.WriteString(style.selectedEdge.render("│"))
 				} else {
 					output.WriteString(bar)
@@ -136,11 +143,16 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 				}
 				output.WriteString(cellContents(line, cell))
 			}
-			output.WriteString(bar)
+			if selectedColumn == calendarColumns-1 {
+				output.WriteString(style.selectedEdge.render("│"))
+			} else {
+				output.WriteString(bar)
+			}
 			output.WriteString("\n")
 		}
+		previousSelectedColumn = selectedColumn
 	}
-	output.WriteString(horizontalRule(style, cell, "└", "┴", "┘"))
+	output.WriteString(ruledLine(style, cell, "└", "┴", "┘", "─", style.border, previousSelectedColumn))
 
 	fmt.Fprintf(&output, "\n%s · %s · %d/%d repositories read (%d discovered).\n",
 		count(total, "commit", "commits"),
@@ -232,20 +244,46 @@ func weekdayNames(text int) []string {
 }
 
 func horizontalRule(style styles, cell int, left, join, right string) string {
-	segments := make([]string, calendarColumns)
-	for i := range segments {
-		segments[i] = strings.Repeat("─", cell)
-	}
-	return style.border.render(left+strings.Join(segments, join)+right) + "\n"
+	return ruledLine(style, cell, left, join, right, "─", style.border, -1)
 }
 
 // A dashed, dim rule separates weeks without competing with commit text.
-func weekRule(style styles, cell int) string {
-	segments := make([]string, calendarColumns)
-	for i := range segments {
-		segments[i] = strings.Repeat("┄", cell)
+func weekRule(style styles, cell, selectedColumn int) string {
+	return ruledLine(style, cell, "├", "┼", "┤", "┄", style.weekRule, selectedColumn)
+}
+
+// ruledLine colours the two corners and horizontal edge around a selected
+// cell. Selected week edges become solid, leaving the rest of the separator
+// dashed and quiet.
+func ruledLine(style styles, cell int, left, join, right, fill string, base paint, selectedColumn int) string {
+	var output strings.Builder
+	for column := 0; column < calendarColumns; column++ {
+		junction := join
+		if column == 0 {
+			junction = left
+		}
+		junctionStyle := base
+		if selectedColumn >= 0 && (column == selectedColumn || column == selectedColumn+1) {
+			junctionStyle = style.selectedEdge
+		}
+		output.WriteString(junctionStyle.render(junction))
+
+		segment := strings.Repeat(fill, cell)
+		segmentStyle := base
+		if column == selectedColumn {
+			segment = strings.Repeat("─", cell)
+			segmentStyle = style.selectedEdge
+		}
+		output.WriteString(segmentStyle.render(segment))
 	}
-	return style.weekRule.render("├"+strings.Join(segments, "┼")+"┤") + "\n"
+
+	rightStyle := base
+	if selectedColumn == calendarColumns-1 {
+		rightStyle = style.selectedEdge
+	}
+	output.WriteString(rightStyle.render(right))
+	output.WriteString("\n")
+	return output.String()
 }
 
 // cellContents shortens and pads by display width, so East Asian characters,

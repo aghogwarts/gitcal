@@ -232,6 +232,32 @@ func TestDateStatesAreVisuallyDistinct(t *testing.T) {
 	}
 }
 
+func TestSelectedDateHasCompleteAccentOutline(t *testing.T) {
+	activity := Activity{Month: calendarMonth(2026, time.September)}
+	style := colourful()
+	cell := cellWidth(120)
+	rendered := renderCalendar(activity, calendarOptions{
+		Width: 120, Selected: "2026-09-04", EntriesPerDay: 3, Styles: style,
+	})
+	rows := gridRows(rendered)
+
+	// 4 September is in the first week. Its row is enclosed by the separator
+	// above it and the separator above the following week.
+	for _, row := range []string{rows[2], rows[4]} {
+		plain := ansi.Strip(row)
+		segments := strings.FieldsFunc(plain, func(r rune) bool {
+			return strings.ContainsRune("├┼┤", r)
+		})
+		if len(segments) != calendarColumns || segments[4] != strings.Repeat("─", cell) {
+			t.Fatalf("selected cell is missing a solid horizontal edge: %q", plain)
+		}
+	}
+
+	if got := strings.Count(rows[3], style.selectedEdge.render("│")); got != 2 {
+		t.Fatalf("selected cell should have two accent side edges, found %d: %q", got, rows[3])
+	}
+}
+
 // cellFor returns the grid cell whose visible text is exactly the given date.
 func cellFor(t *testing.T, rendered, day string) string {
 	t.Helper()

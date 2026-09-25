@@ -267,8 +267,8 @@ line is for scripting or editing several repositories at once.
 - Colours adapt to light and dark terminal backgrounds, and degrade on
   terminals with limited colour support. Redirected output and `NO_COLOR`
   produce plain text.
-- Today is a filled badge, and the selected date has an accent along its cell
-  and a lighter date badge. Plain terminals mark today with `*` and the
+- Today is a filled badge, and the selected date has an accent outline around
+  its cell and a lighter date badge. Plain terminals mark today with `*` and the
   selection with brackets. Weekends with activity are tinted; empty dates and
   internal week separators are dimmed so commit text carries more visual weight.
 - Each repository keeps its own colour, derived from its name so it stays the
