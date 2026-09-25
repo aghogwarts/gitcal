@@ -1,0 +1,40 @@
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..2caa822
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,9 @@
++# Keep source and project text identical across Windows, macOS, and Linux.
++* text=auto
++*.go text eol=lf
++*.mod text eol=lf
++*.sum text eol=lf
++*.yml text eol=lf
++*.yaml text eol=lf
++*.md text eol=lf
++*.toml text eol=lf
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index f56fb7e..9dc63f9 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -31,7 +31,13 @@ jobs:
+ 
+       - name: Check formatting
+         shell: bash
+-        run: test -z "$(gofmt -l .)"
++        run: |
++          files="$(gofmt -l .)"
++          if [ -n "$files" ]; then
++            echo "These files are not gofmt-formatted:"
++            printf '%s\n' "$files"
++            exit 1
++          fi
+ 
+       - name: Vet
+         run: go vet ./...
+ 
+       - name: Test
+         run: go test -count=1 ./...
+ 
+       - name: Build
+         run: go build ./...
