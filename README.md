@@ -1,5 +1,7 @@
 # gitcal
 
+[![CI](https://github.com/aghogwarts/gitcal/actions/workflows/ci.yml/badge.svg)](https://github.com/aghogwarts/gitcal/actions/workflows/ci.yml)
+
 A local Git activity calendar for the terminal, written in Go.
 
 `gitcal` discovers Git repositories on your computer and places their commits
@@ -16,6 +18,26 @@ It currently supports:
 - cancellation, partial-result warnings, and timing diagnostics; and
 - an in-memory cache for recently visited month/filter combinations.
 
+## Install
+
+With Go installed, install the latest version directly from GitHub:
+
+```sh
+go install github.com/aghogwarts/gitcal@latest
+```
+
+The executable is placed in Go's binary directory, normally `~/go/bin` on
+macOS/Linux or `%USERPROFILE%\go\bin` on Windows. Add that directory to `PATH`
+if the `gitcal` command is not found.
+
+To build from a clone instead:
+
+```sh
+git clone https://github.com/aghogwarts/gitcal.git
+cd gitcal
+go build .
+```
+
 ## Requirements
 
 - Install Go 1.26 or newer from https://go.dev/dl/.
@@ -23,10 +45,10 @@ It currently supports:
 - `go.mod` declares the required third-party dependencies and a Go 1.26 floor.
   `go run` and `go build` download dependencies on first use.
 
-## Run
+## Quick start
 
-Extract the project and open a terminal inside the `gitcal` folder containing
-`go.mod`. First check `go version` and `git --version`.
+The examples below use `go run .` so they work directly from a source checkout.
+If you installed the executable, replace `go run .` with `gitcal`.
 
 Windows PowerShell:
 
@@ -62,6 +84,8 @@ Run `go test ./...` for tests and `go vet ./...` for static checks.
 The tests use temporary repositories and require Git. A symlink test may skip
 on Windows when the current account cannot create symlinks. Tests never read or
 write your real settings; they point `GITCAL_CONFIG` at a temporary file.
+
+Contribution guidance is available in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Read one repository's history
 
@@ -506,14 +530,19 @@ author filtering.
 | `tui_test.go`      | Key handling, month clamping, stale scans and view transitions  |
 | `config_test.go`   | Save/load round trips, path matching, filtering and the commands |
 
-Five direct dependencies: `golang.org/x/term` for terminal size,
+The application has five direct dependencies: `golang.org/x/term` for terminal size,
 `github.com/charmbracelet/x/ansi` for display-width truncation,
 `github.com/charmbracelet/bubbletea` for the interactive interface,
 `github.com/charmbracelet/lipgloss` for adaptive colour, and
-`github.com/pelletier/go-toml/v2` for the settings file. `ansi` is pinned to
-v0.10.x because Bubble Tea's rendering stack is incompatible with v0.11.
-All seven commands remain available.
+`github.com/pelletier/go-toml/v2` for the settings file. Tests also use
+`github.com/muesli/termenv` directly to exercise coloured output. `ansi` is
+pinned to v0.10.x because Bubble Tea's rendering stack is incompatible with
+v0.11. All seven commands remain available.
 
-The module path is still local (`module gitcal`). Updating it to the GitHub import
-path, choosing a licence, adding CI, and preparing release binaries are separate
-release-cleanup steps.
+The module path is `github.com/aghogwarts/gitcal`. CI tests every push and pull
+request on Windows, macOS, and Linux. Version tags and downloadable release
+binaries will be added as a separate release step.
+
+## Licence
+
+gitcal is available under the [MIT Licence](LICENSE).

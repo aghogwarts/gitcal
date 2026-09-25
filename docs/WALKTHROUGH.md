@@ -11,8 +11,10 @@ on that answer. Keeping discovery separate lets us understand and verify it firs
 ## 1. How Go sees the project
 
 `go.mod` defines a module: a collection of Go packages that belong together.
-`module gitcal` is our temporary module name. The `go` line sets the minimum Go
-language version; it is not a requirement to install that exact compiler release.
+The original increment used the temporary name `module gitcal`; the published
+project now uses `module github.com/aghogwarts/gitcal`. The `go` line sets the
+minimum Go language version; it is not a requirement to install that exact
+compiler release.
 
 Both production files begin with `package main`. Files in the same directory and
 package are compiled together, so `main.go` can call `scan` in `scan.go` without

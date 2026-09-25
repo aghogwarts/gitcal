@@ -1,5 +1,16 @@
+# Local binaries and release output
 /gitcal
 /gitcal.exe
 /dist/
+
+# Test and coverage output
+/coverage.out
+/*.test
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
 
 AGENTS.md
