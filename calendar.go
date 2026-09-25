@@ -77,8 +77,16 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 	bar := style.border.render("│")
 
 	var output strings.Builder
-	fmt.Fprintf(&output, "%s\n\n", style.heading.render(first.Format("January 2006")+
-		" — local author dates, all authors and merges"))
+	filters := []string{"all repositories", "all authors"}
+	if options.Group != "" {
+		filters[0] = options.Group
+	}
+	if options.Mine {
+		filters[1] = "mine"
+	}
+	fmt.Fprintf(&output, "%s  %s\n\n",
+		style.heading.render(first.Format("January 2006")),
+		style.status.render("· "+strings.Join(filters, " · ")))
 
 	output.WriteString(horizontalRule(style, cell, "┌", "┬", "┐"))
 	output.WriteString(bar)
@@ -134,23 +142,14 @@ func renderCalendar(activity Activity, options calendarOptions) string {
 	}
 	output.WriteString(horizontalRule(style, cell, "└", "┴", "┘"))
 
-	scope := fmt.Sprintf("read %d of %d selected repositories (%d discovered)",
+	fmt.Fprintf(&output, "\n%s · %s · %d/%d repositories read (%d discovered).\n",
+		count(total, "commit", "commits"),
+		count(len(activity.Days), "active day", "active days"),
 		activity.ReadRepositories, activity.SelectedRepositories, activity.DiscoveredRepositories)
-	var tags []string
-	if options.Mine {
-		tags = append(tags, "mine only")
-	}
-	if options.Group != "" {
-		tags = append(tags, options.Group+" only")
-	}
-	if len(tags) > 0 {
-		scope = style.label.render(strings.Join(tags, " · ")) + " · " + scope
-	}
-	fmt.Fprintf(&output, "\n%d unique commits on %d days; %s.\n", total, len(activity.Days), scope)
 	footer := options.Footer
 	if footer == "" {
 		footer = style.status.render(fmt.Sprintf(
-			"Showing up to %d commits per date. Use --day YYYY-MM-DD for one date's full list.",
+			"Up to %d commits per date · --day YYYY-MM-DD shows the full date",
 			options.EntriesPerDay))
 	}
 	fmt.Fprintln(&output, footer)

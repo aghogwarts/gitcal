@@ -554,8 +554,7 @@ func (m calendarModel) View() string {
 		Group:         m.activeGroup,
 		Mine:          m.chosen.authors.mineOnly,
 		Styles:        m.styles,
-		Footer: m.status("←↑↓→ date · [ ] month · enter open · g repos · " +
-			"tab group · m mine · t today · r refresh · ? help · q quit"),
+		Footer:        m.status("←↑↓→ move · [ ] month · enter open · g repos · ? all keys · q quit"),
 	})
 }
 
@@ -669,6 +668,8 @@ func (m calendarModel) helpView() string {
 	for _, name := range []string{"api", "website", "tooling", "docs"} {
 		output.WriteString(m.styles.repository(name).render(name) + "  ")
 	}
+	output.WriteString("\n\n" + m.styles.status.render(
+		"Dates use local author time. Merges and all authors are included unless filtered.") + "\n")
 	output.WriteString("\n\n" + m.styles.status.render(
 		"A new month reads every selected repository's history. The six most\n"+
 			"recent completed views stay in memory; r fetches fresh data.") + "\n")

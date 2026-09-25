@@ -273,6 +273,8 @@ line is for scripting or editing several repositories at once.
   internal week separators are dimmed so commit text carries more visual weight.
 - Each repository keeps its own colour, derived from its name so it stays the
   same as months change and as other repositories come and go.
+- The header shows the month and active repository/author filters. The compact
+  footer keeps common navigation visible; `?` opens the complete key reference.
 - `--day` and `--month` cannot be combined: a date already identifies its month.
 - The summary below the grid counts every commit in the month, not the visible
   ones. Use `--day` or raise `--per-day` to see the rest.

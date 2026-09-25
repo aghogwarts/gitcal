@@ -168,7 +168,7 @@ func TestCalendarCountsCommitsItCannotShow(t *testing.T) {
 	if strings.Count(rendered, "Routine change") != 2 {
 		t.Fatalf("expected exactly two visible entries:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "5 unique commits on 1 days") {
+	if !strings.Contains(rendered, "5 commits · 1 active day") {
 		t.Fatalf("summary should count every commit, not the visible ones:\n%s", rendered)
 	}
 }
