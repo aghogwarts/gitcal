@@ -1,84 +1,75 @@
-# Step 6a verification
+# Verification
 
-Checked natively on Windows 11 (amd64) with Go 1.27.1 and Git on `PATH`.
+This document records how the current project is checked. The individual step
+walkthroughs remain historical learning notes; this file describes the combined
+application.
 
-- `gofmt -l .` reported no files needing formatting.
-- `go vet ./...`: passed.
-- `go test ./...`: 43 test functions passed. None failed and none were skipped,
-  so the symlink test that can skip on accounts without symlink privilege did
-  run in this environment.
-- Compilation passed for `windows/amd64`, `windows/arm64`, `darwin/amd64`,
-  `darwin/arm64`, and `linux/amd64`.
+## Automated checks
 
-## Ran natively, not just compiled
+Run these commands from the folder containing `go.mod`:
 
-Against a real projects folder containing nine repositories, using
-`GITCAL_CONFIG` so the check could not disturb a real configuration:
+```sh
+gofmt -l .
+go vet ./...
+go test -count=1 ./...
+```
 
-- `roots` with nothing configured printed the `roots add` suggestion.
-- `activity` with nothing configured and redirected output exited 1 and
-  explained the `roots add` command instead of waiting for input.
-- `roots add` then `repos` listed all nine repositories as `ungrouped`.
-- `repos set` assigned `work` and `personal`, and `repos exclude` excluded one.
-  `repos` then reported `9 repositories: 1 excluded, 1 personal, 1 work,
-  6 ungrouped`.
-- The written file used TOML literal strings with unescaped Windows paths and
-  carried its explanatory header.
-- `calendar --static --group personal` drew the month and reported
-  `7 unique commits on 2 days; personal only · read 1 of 1 selected
-  repositories (9 discovered)`, confirming that filtering reaches the summary
-  line and that discovery still counts every repository.
+`gofmt -l .` should print nothing. The test suite creates temporary repositories
+and points `GITCAL_CONFIG` at temporary files, so it does not read or modify the
+user's repositories or gitcal configuration. Git must be available on `PATH`.
+A directory-symlink test may skip on Windows accounts that cannot create
+symlinks.
 
-## What the new tests cover
+Cross-platform compilation is checked for:
 
-Configuration: save and load round trip through a folder that does not exist
-yet, unescaped Windows paths in the output, the explanatory header, and a
-malformed file reported with its path.
+- Windows on amd64 and arm64;
+- macOS on amd64 and arm64; and
+- Linux on amd64.
 
-Path matching: case differences, trailing separators, redundant `..` elements,
-reassignment not leaving a duplicate entry under an old spelling, clearing a
-group, and adding the same root twice under different spellings.
+Cross-compilation verifies that the code builds for each target. It does not
+replace running the executable on that operating system.
 
-Filtering: group selection, case-insensitive group names, the `ungrouped`
-bucket behaving as a real group, exclusion overriding a matching group,
-un-excluding, and the zero filter including everything.
+## What the tests cover
 
-Commands: `roots add`/`remove`/`list` including a non-existent folder and
-removing something not configured, `repos set`/`exclude`/`include`/`list`,
-and wrong argument counts returning usage exit code 2.
+- Repository discovery: ordinary repositories, nested repositories, linked
+  worktrees, directory links, invalid roots, partial failures, and cancellation.
+- History: complete fields, author timestamps, merge commits, worktrees, branch
+  scope, malformed Git output, empty repositories, and read-only behaviour.
+- Activity: month boundaries, daylight-saving transitions, stable ordering,
+  duplicate commit hashes, partial results, streaming history, and timing output.
+- Calendar rendering: week placement, six-week months, responsive cell content,
+  display-width alignment, overflow summaries, adaptive date states, repository
+  colours, and the complete selected-date accent outline.
+- Interactive calendar: movement, month changes, loading and error states,
+  cancellation, detail navigation, help, group cycling, mine-only filtering,
+  refreshes, and the six-view in-memory cache.
+- Repository picker: group editing, exclusions, reserved characters while
+  typing, cancellation, scan interruption, cache invalidation, and state
+  preservation when returning to the calendar.
+- Configuration: atomic save/load round trips, Windows path handling, multiple
+  roots, groups, exclusions, identities, explicit-folder overrides, and command
+  argument validation.
 
-Selection: an explicit folder overriding configured roots and not inheriting
-saved exclusions, and a non-terminal run declining to prompt.
+## Native checks
 
-Multi-root scanning: one unreadable root warning while the readable one still
-returns its repositories, overlapping roots not duplicating a repository, and
-losing every root still being an error.
+The application has been exercised natively on Windows 11 with Git on `PATH`,
+including repository discovery, saved roots, grouping, exclusions, identities,
+activity timing, and the interactive calendar. The terminal UI and selection
+states have also been reviewed there.
 
-End to end: groups deciding which commits are counted, `SelectedRepositories`
-and `DiscoveredRepositories` reported separately, excluded repositories never
-contributing commits, and the group travelling with each commit for the
-detail view.
+Native macOS terminal verification is still pending. In particular, it should
+confirm the configuration location, keyboard handling, colour rendering, and
+path matching on the user's actual filesystem.
 
-Earlier increments' tests were kept and still pass, which is the evidence that
-filtering did not disturb deduplication, timezone handling, grid alignment, or
-the interactive key handling.
+## Limits of verification
 
-## Limits of this check
-
-Cross-compilation confirms the code builds for a target; it does not establish
-native runtime behaviour. **macOS has still not been run natively**, so
-`os.UserConfigDir` resolving to `~/Library/Application Support`, and the
-case-insensitive path matching that this step deliberately applies only on
-Windows, remain unverified there. macOS filesystems are usually
-case-insensitive, so a repository referred to with different capitalisation
-may not match its saved group on a Mac; `pathKey` would need to fold case on
-Darwin too if that proves to be a problem in practice.
-
-The atomic save was reasoned about rather than tested by interruption; no test
-kills the process mid-write. Concurrent runs of `gitcal` editing the
-configuration at the same time are not coordinated, so the last writer wins.
-
-No large-repository performance benchmark was performed. Exclusion now happens
-before history is read, so excluding a repository does save that work, but the
-selected repositories are still read in full on every month change. Caching is
-step 8.
+- A successful cross-build does not establish native runtime behaviour.
+- The atomic configuration write is tested as a round trip, but no test kills
+  the process during the rename. Concurrent configuration edits are not
+  coordinated; the last writer wins.
+- Terminal colour tests validate emitted styles and display width, not every
+  terminal emulator or theme.
+- `activity --timings` is a diagnostic for comparing changes on the same
+  machine, not a portable benchmark.
+- Persistent caching and progress reporting remain deferred work, as documented
+  in the README.

@@ -1,23 +1,27 @@
-# gitcal — step 7: your Git identities
+# gitcal
 
-A learning project for a local Git calendar, written in Go.
+A local Git activity calendar for the terminal, written in Go.
 
-The planned interface is a traditional monthly calendar with commits as events
-inside each day, optional repository groups, and filters. **This version discovers
-repositories, reads their history, presents one month at a time as a calendar you
-can move around with the keyboard, remembers which folders to scan, lets you
-assign each repository's group or exclude it either from the command line or from
-inside the interactive calendar, and lets you tell it which author emails are
-yours so you can switch between your own commits and everyone's.** Caching is
-not implemented yet.
-`gitcal` is a working name, not a checked or reserved public project name.
+`gitcal` discovers Git repositories on your computer and places their commits
+inside a traditional monthly calendar. It is read-only: it does not fetch,
+commit, modify repositories, or send repository data anywhere.
+
+It currently supports:
+
+- an interactive calendar with keyboard navigation and commit detail views;
+- saved scan roots, repository groups, and repository exclusions;
+- personal identity filtering across multiple email addresses;
+- static calendar, daily detail, and chronological activity output;
+- adaptive terminal colours and repository-specific commit colours;
+- cancellation, partial-result warnings, and timing diagnostics; and
+- an in-memory cache for recently visited month/filter combinations.
 
 ## Requirements
 
 - Install Go 1.26 or newer from https://go.dev/dl/.
 - Install Git and ensure `git --version` works in your terminal.
-- Steps 4 to 6 added third-party dependencies; `go.mod` declares a Go 1.26 floor
-  because of them. `go run` and `go build` download them on first use.
+- `go.mod` declares the required third-party dependencies and a Go 1.26 floor.
+  `go run` and `go build` download dependencies on first use.
 
 ## Run
 
@@ -82,8 +86,8 @@ characters of the commit hash, the subject, and the author's name and email.
 - Git's normal log ordering is preserved (generally reverse committer-date order).
   The displayed author dates are not used to sort the output and may appear out of
   order. Author and committer timestamps are different fields in Git.
-- All authors and merge commits are included in this learning increment. Author
-  filtering, branch selection, and calendar counting rules remain future work.
+- The history preview includes all authors and merge commits. Author filtering
+  is available in `activity` and `calendar`; branch selection is not implemented.
 - Original author timestamps and offsets are parsed into `time.Time`; only display
   converts them to the machine's local timezone. That can change the calendar date.
 - Empty branches report `No commits yet on the current branch.` successfully.
@@ -178,8 +182,9 @@ differ, so gitcal checks author dates as it reads. Large histories and broad
 scan roots can still be slow. The interactive calendar keeps up to six completed
 month/filter views in memory during that run, so revisiting one needs no scan.
 `r` reads fresh data; a new run starts with an empty cache. `activity` and the
-static calendar still read fresh data every time. Faster first loads, progress
-reporting, and saved repository selections are future work.
+static calendar still read fresh data every time. Work that could improve first
+loads and reuse results between processes is listed under
+[Deferred performance work](#deferred-performance-work).
 
 ## Browse the month as a calendar
 
@@ -258,7 +263,7 @@ line is for scripting or editing several repositories at once.
 - A new month reads the selected repositories' history, which can take time.
   Revisited months use the in-memory cache when the group and `m` filter match.
   `r` and picker edits discard cached activity. Superseded scans are cancelled.
-- Weeks start on **Monday**. A configurable Sunday start is future work.
+- Weeks currently start on **Monday**.
 - The grid sizes itself to the terminal, clamped between 78 and 204 columns.
   Redirecting output to a file or pipe uses 80 columns.
 - Cells carry the commit subject, adding the repository name and then the time
@@ -413,26 +418,59 @@ go run . activity --month 2026-09 --mine --group work
 Exit codes: `0` success/help (including empty results), `1` failure or incomplete results,
 `2` invalid command usage.
 
-## Intentional limits of this increment
+## Current limitations
 
 A repository belongs to one group, so overlapping categories are not
 expressible. There is no persistent cache or automatic dependency-folder
 exclusion, so the first visit to each month re-reads every selected repository;
 the grid does not scroll itself. `scan` and `history` still take
 exactly one folder. Large directory trees may take time to scan. Bare
-repositories are not discovered because this increment looks for working
+repositories are not discovered because discovery looks for working
 checkouts with a `.git` marker. Separate worktrees appear separately in `scan`,
 while `activity` and `calendar` deduplicate their commits. Moving or renaming a
 repository on disk leaves its saved group behind, pointing at the old path.
 Identities match by email only; a co-author or a name-only match is not
 detected, and there is no interactive picker for identities yet, only the
 `identities` command. All commands have been run natively on Windows; macOS
-still needs verification.
+still needs native terminal verification.
 
-## Verification for this increment
+## Deferred performance work
 
-See [docs/VERIFICATION.md](docs/VERIFICATION.md) for the checks performed on this
-increment and their limits.
+These improvements are deliberately postponed until after the first public
+release. The existing `--timings` option provides separate discovery, Git
+history, other-work, total, and slowest-repository measurements for evaluating
+them.
+
+- Persist repository history metadata between launches instead of keeping only
+  the current six-view in-memory cache.
+- Key cached history by repository and `HEAD`, invalidating it when the checked
+  out history changes.
+- Reuse discovered repository paths between launches, with `r` remaining the
+  explicit way to rescan.
+- Show progress during an uncached discovery and history read without making
+  static or redirected output noisy.
+
+Any persistent cache must remain an optimisation: deleting it must be safe, and
+`r` must continue to guarantee a fresh read.
+
+## Optional future features
+
+These are possible extensions rather than requirements for the initial release:
+
+- configurable Monday or Sunday week starts;
+- an interactive identity manager alongside the repository picker;
+- detection and cleanup of saved paths after repositories are moved or deleted;
+- optional automatic exclusions for dependency and generated-code folders;
+- multiple groups or tags per repository;
+- branch selection or activity across all local branches;
+- discovery of bare repositories;
+- JSON or CSV export for integrations and personal analysis; and
+- configurable colours, cell density, and other calendar display preferences.
+
+## Verification
+
+See [docs/VERIFICATION.md](docs/VERIFICATION.md) for the checks performed on the
+project and their limits.
 
 ## Learn the code
 
@@ -476,6 +514,6 @@ Five direct dependencies: `golang.org/x/term` for terminal size,
 v0.10.x because Bubble Tea's rendering stack is incompatible with v0.11.
 All seven commands remain available.
 
-The module name is deliberately local for now. When a GitHub repository is chosen,
-we can change it to that repository's import path. Publishing and a license choice
-are separate future steps.
+The module path is still local (`module gitcal`). Updating it to the GitHub import
+path, choosing a licence, adding CI, and preparing release binaries are separate
+release-cleanup steps.
